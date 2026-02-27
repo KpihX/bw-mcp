@@ -15,6 +15,24 @@ L'agent IA (Claude/Gemini) lit cette phrase. Il réalise qu'il a besoin d'inform
 
 ## 🎬 PHASE 1 : Fetching Sécurisé & Sanitization
 
+```mermaid
+sequenceDiagram
+    participant S as server.py
+    participant U as ui.py (Zenity)
+    participant W as wrapper.py (Subprocess)
+    participant R as RAM (bytearray)
+    participant B as bw CLI
+    
+    S->>U: ask_master_password()
+    U-->>S: "SuperSecret123"
+    S->>W: unlock_vault("SuperSecret123")
+    W->>R: pw_bytes = bytearray("SuperSecret...")
+    W->>B: subprocess.run(env={"BW_PASSWORD"})
+    B-->>W: session_key (stdout)
+    W->>R: for i in pw_bytes: i = 0x00 (WIPE)
+    W-->>S: session_key
+```
+
 ### 1. Entrée dans `server.py`
 L'outil `@mcp.tool() get_vault_map()` est déclenché par le client MCP.
 * L'outil tente de récupérer la structure du coffre. Mais le coffre est verrouillé.
