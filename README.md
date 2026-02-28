@@ -19,13 +19,25 @@ If you want to understand the codebase, read the documentation in this specific 
 5. **[The Destructive Firewall](docs/05_simulation_destructive_firewall.md)**: How Zenity prevents AI hallucinations from deleting your life.
 
 ```text
-       [ USER PROMPT ]
-              |
-      (01) CORE READ ----> [ REDACTION LAYER ] ----> (03) PII SHIELD
-              |                  |                         |
-      (02) BATCH WRITE <---------+ <-----------------------+
-              |
-      (05) FIREWALL (Human-In-The-Loop) ----> [ BITWARDEN VAULT ]
+   [ USER PROMPT ]  : "IpihX, rename my GitHub account and move it to Dev."
+          |
+          v
+   (01) CORE READ   : Proxy unlocks Vault in RAM (then wipes Master Password)
+          |
+          v
+   [ CENSORY LAYER ]: Pydantic overwrites 🔐 Secrets & 🪪 PII (SSN, CVV...)
+          |           --> [ See: docs/03_simulation_pii_redaction.md ]
+          v
+   [ THE AI BRAIN ] : Sees metadata only (IDs, Names). Proposes a Batch.
+          |
+          v
+   (02) BATCH WRITE : Proxy checks actions against Strict Enums (Anti-Hallucination)
+          |           --> [ See: docs/02_simulation_vault_organization.md ]
+          v
+   (05) HITL FIREWALL : ⚠️ RED ALERT Popup on your screen. You click 'Approve'.
+          |           --> [ See: docs/05_simulation_destructive_firewall.md ]
+          v
+   [ BITWARDEN VAULT ]: Proxy executes commands safely. Final RAM Wipe.
 ```
 
 ### Flow Visualization: How the Proxy Works

@@ -24,6 +24,11 @@ Ce document illustre comment le BW-Blind-Proxy gère les opérations les plus sp
 L'utilisateur `kpihx` dit à l'agent IA :
 > *"IpihX, j'ai fait une erreur, restaure le compte 'Projet Alpha' de la corbeille. Ensuite, déplace ce compte vers l'Organisation Lokad (id: org-lokad), active la demande de Master Password à chaque consultation, et supprime la pièce jointe 'vieux-logo.png' (id: att-55) qui ne sert plus à rien."*
 
+## 🎬 PHASE 0 : La Visibilité de la Corbeille
+Avant d'agir, l'agent IA doit savoir *quel* est l'UUID du compte "Projet Alpha".
+Le proxy gère cela intelligemment. L'outil `get_vault_map` exécute en coulisses `bw list items` **ET** `bw list items --trash`.
+Il renvoie à l'IA un JSON organisé avec deux tableaux distincts : `items` (le coffre actif) et `trash_items` (les éléments supprimés). L'IA peut donc scanner la corbeille et identifier l'UUID `projet-alpha-id` sans intervention humaine.
+
 ## 🎬 PHASE 1 : La Forge du Payload (Enums)
 
 L'agent IA utilise les 15 actions strictes dérivées de `ItemAction` pour forger son JSON.

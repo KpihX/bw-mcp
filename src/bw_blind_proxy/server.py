@@ -32,16 +32,21 @@ def get_vault_map() -> str:
         raw_folders = SecureSubprocessWrapper.execute_json(["list", "folders"], session_key)
         folders = [BlindFolder(**f).model_dump(exclude_unset=True) for f in raw_folders]
         
-        # Fetch Items
+        # Fetch Active Items
         raw_items = SecureSubprocessWrapper.execute_json(["list", "items"], session_key)
         items = [BlindItem(**i).model_dump(exclude_unset=True) for i in raw_items]
+        
+        # Fetch Deleted (Trash) Items
+        raw_trash = SecureSubprocessWrapper.execute_json(["list", "items", "--trash"], session_key)
+        trash_items = [BlindItem(**i).model_dump(exclude_unset=True) for i in raw_trash]
         
         result = {
             "status": "success",
             "message": "Vault map successfully retrieved. Sensitive fields are redacted.",
             "data": {
                 "folders": folders,
-                "items": items
+                "items": items,
+                "trash_items": trash_items
             }
         }
         
