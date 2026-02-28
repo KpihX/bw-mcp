@@ -12,38 +12,45 @@ It strongly enforces the **"AI-Blind Management"** philosophy. You can ask an AI
 
 The transparency of this proxy is its greatest strength. Here is exactly how an AI interacts with your vault.
 
-```mermaid
-sequenceDiagram
-    participant LLM as AI Agent (Claude/Gemini)
-    participant MCP as BW-Blind-Proxy
-    participant Pydantic as Pydantic Validation
-    participant HITL as Zenity UI (Human)
-    participant RAM as C-level RAM (bytearrays)
-    participant BW as Bitwarden CLI (Local)
+```text
+================================================================================
+                    PHASE 1: READING METADATA (AI-Blind)
+================================================================================
 
-    Note over LLM,BW: PHASE 1: Reading Metadata
-    LLM->>MCP: Call tool: get_vault_map()
-    MCP->>HITL: Ask Master Password
-    HITL-->>MCP: Master Password String
-    MCP->>RAM: pw_bytes = bytearray(Master Password)
-    MCP->>BW: bw unlock (via injected Env Var)
-    RAM-->>RAM: Scrub pw_bytes to 0x00
-    BW-->>MCP: RAW EXHAUSTIVE JSON (Contains Passwords!)
-    MCP->>Pydantic: Parse to BlindItem[BlindIdentity, BlindCard...]
-    Pydantic-->>Pydantic: DELETE passwords, CVVs, SSNs, TOTPs
-    Pydantic->>LLM: Return Sanitized Structural Vault Map
+ [ AI Agent ]                       [ BW-Blind-Proxy ]               [ Bitwarden CLI ]
+      |                                     |                                |
+      | -- 1. get_vault_map() ------------> |                                |
+      |                                     | -- 2. Zenity UI Prompt       | |
+      |                                     | <- User enters Master Pw --  | |
+      |                                     |                                |
+      |                                     | -- 3. bw unlock -----------> |
+      |                                     | <- Vault JSON (Uncensored) - |
+      |                                     |                                |
+      |   (Pydantic Validation Firewall)    |                                |
+      |   * Redact 'password', 'totp' *     |                                |
+      |   * Redact 'CVV', 'SSN', etc. *     |                                |
+      |                                     |                                |
+      | <- 4. Sanitized Structural Map ---- |                                |
+      |                                     |                                |
 
-    Note over LLM,MCP: AI is now "Blind." It only sees IDs, Folders, and Names.
+================================================================================
+                    PHASE 2: BATCH EXECUTION (Write)
+================================================================================
 
-    Note over LLM,BW: PHASE 2: Batch Execution
-    LLM->>MCP: Call tool: propose_vault_transaction([Rename, Move...])
-    MCP->>Pydantic: Validate Enum Schemas (extra="forbid")
-    Pydantic-->>MCP: Schemas Validated
-    MCP->>HITL: Popup Warning & Rationale Review
-    HITL-->>MCP: Human Approves & Types Password
-    MCP->>BW: Subprocess execute (bw edit item...)
-    BW-->>MCP: Vault Updated
-    MCP->>LLM: Success Message
+ [ AI Agent ]                       [ BW-Blind-Proxy ]               [ Bitwarden CLI ]
+      |                                     |                                |
+      | -- 5. propose_vault_transaction --> |                                |
+      |                                     |   (Enum Schema Validation)     |
+      |                                     |   * extra="forbid" aborts *    |
+      |                                     |                                |
+      |                                     | -- 6. Zenity UI POPUP        | |
+      |                                     | <- User clicks 'Approve' --- | |
+      |                                     |                                |
+      |                                     | -- 7. bw edit item --------> |
+      |                                     | <- Vault Updated ----------- |
+      |                                     |                                |
+      | <- 8. Success Message ------------- |   (Memory Wipe to 0x00)        |
+      |                                     |                                |
 ```
 
 ### The 4 Pillars of Defense

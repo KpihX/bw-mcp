@@ -15,22 +15,25 @@ L'agent IA (Claude/Gemini) lit cette phrase. Il réalise qu'il a besoin d'inform
 
 ## 🎬 PHASE 1 : Fetching Sécurisé & Sanitization
 
-```mermaid
-sequenceDiagram
-    participant S as server.py
-    participant U as ui.py (Zenity)
-    participant W as wrapper.py (Subprocess)
-    participant R as RAM (bytearray)
-    participant B as bw CLI
-    
-    S->>U: ask_master_password()
-    U-->>S: "SuperSecret123"
-    S->>W: unlock_vault("SuperSecret123")
-    W->>R: pw_bytes = bytearray("SuperSecret...")
-    W->>B: subprocess.run(env={"BW_PASSWORD"})
-    B-->>W: session_key (stdout)
-    W->>R: for i in pw_bytes: i = 0x00 (WIPE)
-    W-->>S: session_key
+```text
+ +---------+      (1) Ask       +--------------+
+ | server  | -----------------> |  ui (Zenity) |
+ |  (MCP)  | <----------------- |              |
+ +----+----+      "Password"    +--------------+
+      |
+      | (2) unlock_vault("Password")
+      v
+ +----+----+      (3) Convert to bytearray      +-----------+
+ | wrapper | ---------------------------------> |    RAM    |
+ | (Python)| <--------------------------------- | [P][a][s] |
+ +----+----+                                    +-----+-----+
+      |                                               ^
+      | (4) subprocess.run(env={"BW_PASSWORD"})       |
+      v                                               |
+ +----+----+                                          |
+ | bw CLI  |       (6) WIPE bytearray to 0x00         |
+ | (Local) | -----------------------------------------+
+ +---------+
 ```
 
 ### 1. Entrée dans `server.py`
