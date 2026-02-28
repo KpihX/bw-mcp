@@ -31,6 +31,10 @@ Whenever modifying the codebase (adding an Action, changing a schema, changing t
 ## 🧠 Knowledge Retention
 The agent must proactively update the `README.md` and this `AGENT.md` as the project evolves. Current status: 
 - **17 `StrEnum` Actions** deployed for 100% API coverage.
-- **ACID Transaction Engine** (Virtual Vault -> Disk WAL -> Execution) active.
+- **ACID Transaction Engine** (Virtual Vault → Disk WAL → Execution) active.
 - **Auditing CLI** active (`bw-proxy logs` & `bw-proxy purge`).
 - **Internalized Configuration** active (`config.yaml` & `config.py`).
+- **Configurable Batch Size Cap** active (`MAX_BATCH_SIZE` from config, enforced at Pydantic level in `models.py`, injected dynamically into tool docstring in `server.py`).
+- **Shared Rollback Engine** active (`_perform_rollback(tx_id, stack, session_key)` in `transaction.py`): single source of truth for LIFO rollback, consumed by both `execute_batch` (on operation failure) and `check_recovery` (on boot, if WAL found).
+- **Idempotent Rollback** active (`pop_rollback_command(tx_id)` in `wal.py`): after every successful rollback command, the command is popped from the WAL JSON file on disk, ensuring that a crash-during-rollback will NOT cause double-application of already-executed compensating commands on the next boot.
+- **Non-Destructive `check_recovery`** active: if `_perform_rollback` fails during recovery, the WAL is intentionally NOT cleared. The LLM receives a structured diagnostic message so it can retry (transient network error) or escalate to the user (permanent error like "Item not found").

@@ -321,30 +321,56 @@ During every transaction execution, the proxy writes a **Write-Ahead Log** to `~
 ```
 
 **The invariant:**  
-`rollback_commands[N]` is the compensating action for the `N`-th successful operation, stored in **append-then-reverse** order (`list.extend(reversed(cmds))`). On recovery, iterating `reversed(rollback_commands)` replays them in perfect LIFO order.
+`rollback_commands[N]` is the compensating action for the `N`-th successful operation, stored in **append-then-reverse** order (`list.extend(reversed(cmds))`). On recovery, the list is traversed bottom-up (LIFO), and **each command is popped from the file after successful execution** to guarantee idempotency (see `pop_rollback_command`).
 
 ```text
-State Machine: WAL lifecycle
+State Machine: WAL lifecycle (v2 — Idempotent Rollback)
 
   [TX STARTS]
        |
        v
-  write_wal(tx_id, [])          ← empty WAL always exists during a TX
+  write_wal(tx_id, [])              ← empty WAL always exists during a TX
        |
        v
   [OP 1 EXECUTES OK]
-  write_wal(tx_id, [rb_1])     ← WAL updated after each success
+  write_wal(tx_id, [rb_1])         ← WAL updated after each success
        |
        v
   [OP 2 EXECUTES OK]
-  write_wal(tx_id, [rb_2, rb_1])
+  write_wal(tx_id, [rb_1, rb_2])   ← rb_2 is at the end = LIFO head
        |
-  ...crash? → WAL file persists on disk, proxy auto-recovers on next boot
+  ...crash? → WAL file persists on disk
        |
        v
-  [TX COMPLETES]
-  clear_wal()                   ← WAL deleted. Clean slate.
+  [ON NEXT BOOT: check_recovery()]
+       |
+       v
+  _perform_rollback(tx_id, [rb_1, rb_2], session)   ← Shared LIFO engine
+  ┌─ execute rb_2 ✅ → pop_rollback_command(tx_id) → WAL = [rb_1] (flush to disk!)
+  ├─ execute rb_1 ✅ → pop_rollback_command(tx_id) → WAL = []
+  │
+  │   ...CRASH DURING ROLLBACK? No problem:
+  │   At next boot, WAL shows only the REMAINING commands.
+  │   Already-executed rollbacks are NEVER double-applied. ✅ IDEMPOTENT
+  │
+  └─ execute rb_X ❌ → ROLLBACK_FAILED:
+       WAL is intentionally NOT cleared.            ← Diagnostic preserved for LLM
+       LLM receives structured error msg.
+       Human can intervene manually.
+       v
+  [TX FULLY RECOVERED]
+  clear_wal()                                       ← WAL deleted. Clean slate.
 ```
+
+**Shared Engine Architecture:**
+```text
+_perform_rollback(tx_id, stack, session_key)
+  ↑                    ↑
+  │                    │
+execute_batch       check_recovery
+(on op failure)     (on boot, if WAL found)
+```
+Both callers receive the same structured result `{success, executed, failed_cmd, error}` and make their own decision about clearing or preserving the WAL based on that result.
 
 ---
 

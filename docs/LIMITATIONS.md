@@ -96,4 +96,19 @@ FATAL ERROR: Both execution and rollback sessions are dead.
 ### Mitigation
 1. **Keep batches small and fast.** A 10-operation batch completes in milliseconds. A 100-operation batch creates a multi-second window where a session can expire.
 2. **Avoid long transactions on unstable networks (mobile hotspot, public Wi-Fi).** The proxy relies on the session remaining valid for the full duration of the batch.
-3. **The WAL is your safety net.** After a session timeout crash, the WAL file is preserved in `~/.bw-blind-proxy/wal/pending_transaction.json`. Re-run the proxy (log in again), and the system will automatically execute the rollback using your new fresh session on the next tool call.
+3. **The WAL is your idempotent safety net.** After a session timeout crash, the WAL is preserved at `~/.bw-blind-proxy/wal/pending_transaction.json`. On the next tool call, `check_recovery()` reads it and re-attempts the rollback using your fresh session.
+
+   **Crucially:** If the system also crashes *while rolling back* (e.g., two back-to-back Ctrl+C), the WAL is not corrupted. After each successful rollback command, `pop_rollback_command()` removes it from the WAL file on disk. The next recovery attempt picks up **exactly where it left off** — no command is ever applied twice.
+
+   ```text
+   ROLLBACK INTERRUPTED mid-way (Ctrl+C after 2/4 commands):
+
+   WAL before rollback:  [rb_4, rb_3, rb_2, rb_1]  (LIFO order)
+   rb_4 executed ✅  → pop → WAL: [rb_3, rb_2, rb_1]
+   rb_3 executed ✅  → pop → WAL: [rb_2, rb_1]
+   ⚡ CRASH
+
+   WAL on next boot:     [rb_2, rb_1]
+   rb_2 executed ✅  → pop → WAL: [rb_1]
+   rb_1 executed ✅  → pop → WAL: [] → clear_wal() → done.
+   ```
