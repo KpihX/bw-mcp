@@ -141,10 +141,15 @@ The Proxy exposes exactly **two** tools to the AI Agent. This drastically limits
 }
 ```
 
-### 2. `propose_vault_transaction(payload)`
-**Description:** Accepts a batch of actions from the AI, strictly validates the schemas using `extra="forbid"`, displays a Human-in-The-Loop UI for approval, and securely edits the Bitwarden CLI.
-*   **Input (AI provides):** A JSON string matching the `TransactionPayload` schema (A rationale and a list of operations).
-
+### 2. `propose_vault_transaction(rationale, operations)`
+**Description:** Submits a batch of operations (create, edit, delete, move, etc.) for execution. 
+*   **Security & Atomicity guarantees:**
+    *   **Human-In-The-Loop:** The payload is intercepted by a Zenity popup. The human must visually review the operations and enter the Master Password.
+    *   **Strict Polymorphism:** Pydantic strictly validates each operation type. The AI *cannot* specify `password`, `totp`, or `cvv` fields. Any deviation throws a schema error before execution.
+    *   **Snapshot & Rollback Engine (All-or-Nothing):** If the transaction involves 10 actions and fails on the 10th, the proxy automatically executes LIFO compensating actions (restoring deleted folders, un-renaming items, deleting hallucinated creations) to leave the vault in a pristine state.
+*   **Input (AI provides):**
+    *   `rationale` (str): A direct message to the user explaining *why* the AI wants to do this.
+    *   `operations` (List[VaultTransactionAction]): An array of polymorphic action objects.
 **Example Input (How the AI asks):**
 ```json
 {

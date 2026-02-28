@@ -78,3 +78,58 @@ def test_invalid_payload_rejected():
     invalid_raw = {"rationale": "bad", "operations": [{"action": "fake"}]}
     result = TransactionManager.execute_batch(invalid_raw)
     assert "Error: Invalid transaction payload" in result
+
+@patch('bw_blind_proxy.transaction.HITLManager.review_transaction')
+@patch('bw_blind_proxy.transaction.HITLManager.ask_master_password')
+@patch('bw_blind_proxy.transaction.SecureSubprocessWrapper.unlock_vault')
+@patch('bw_blind_proxy.transaction.SecureSubprocessWrapper.execute')
+@patch('bw_blind_proxy.transaction.SecureSubprocessWrapper.execute_json')
+def test_transaction_rollback_lifo(mock_exec_json, mock_exec, mock_unlock, mock_ask, mock_review):
+    """Test that a mid-flight failure triggers compensating actions in reverse (LIFO) order."""
+    mock_review.return_value = True
+    mock_ask.return_value = "pw"
+    mock_unlock.return_value = "session"
+    
+    payload = {
+        "rationale": "Rollback test",
+        "operations": [
+            {"action": "rename_item", "target_id": "item1", "new_name": "Renamed"},
+            {"action": "create_folder", "name": "F1"},
+            {"action": "delete_folder", "target_id": "fail_folder"}
+        ]
+    }
+    
+    mock_exec_json.side_effect = [
+        {"id": "item1", "name": "Original"}, # For rename (safe_edit_item calls get item)
+        {"id": "f_tpl"},                     # For create folder (get template)
+    ]
+    
+    def fake_execute(args, sk):
+        if args[0] == "delete" and args[1] == "folder" and args[2] == "fail_folder":
+            raise SecureBWError("Simulated failure")
+        if args[0] == "create" and args[1] == "folder":
+            return '{"id": "new_folder_uuid"}'
+        return ""
+        
+    mock_exec.side_effect = fake_execute
+    
+    result = TransactionManager.execute_batch(payload)
+    
+    assert "CRITICAL: Transaction failed" in result
+    assert "A full rollback was successfully performed" in result
+    assert "Simulated failure" in result
+    
+    calls = [call[0][0] for call in mock_exec.call_args_list]
+    assert len(calls) == 5
+    
+    # Forward execution
+    assert calls[0][0] == "edit" and calls[0][2] == "item1"
+    assert calls[1][0] == "create" and calls[1][1] == "folder"
+    assert calls[2] == ["delete", "folder", "fail_folder"] # Fails here
+    
+    # LIFO Rollback Execution
+    # Rollback #2 (Undo create folder)
+    assert calls[3] == ["delete", "folder", "new_folder_uuid"]
+    
+    # Rollback #1 (Undo rename)
+    assert calls[4] == ["edit", "item", "item1", '{"id": "item1", "name": "Original"}']

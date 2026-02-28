@@ -74,5 +74,15 @@ Dans `transaction.py`, le subprocess wrapper récupère la session évanescente.
 La session est instantanément convertie en zéros dans la RAM (bytearray wipe).
 L'agent IA, qui était "gelé" (en attente du serveur) pendant tout ce processus, reçoit la chaîne `"Transaction completed successfully."` et annonce à l'humain que son coffre a été purgé de ses anciens éléments.
 
+## 🎬 PHASE 4 : Atomicity & The Rollback Engine
+
+Si le payload contenait 10 opérations, et qu'une erreur réseau ou de validation CLI survient à la **9ème opération**, que se passe-t-il ?
+Le proxy garantit une **atomicité stricte ("Tout ou Rien")**.
+
+1. **Snapshotting :** Avant chaque opération (ex: renommer, déplacer), le proxy crée une sauvegarde JSON de l'état initial de l'item en RAM.
+2. **LIFO Stack :** À chaque succès, une fonction de "compensation" est ajoutée au sommet d'une pile (Ex: si on a fait un "delete folder", la fonction de compensation sera un "restore folder").
+3. **Le Rollback :** Dès la détection du crash sur l'opération 9, le proxy stoppe l'exécution, puis dépile la pile en sens inverse (LIFO). Il exécute les annulations pour les opérations 8, 7, 6... jusqu'à 1.
+4. **Conclusion :** L'agent IA reçoit un message indiquant `CRITICAL: Transaction failed... A full rollback was successfully performed. Vault is pristine.`. Le coffre est revenu à son état exact de départ, évitant tout état corrompu ou semi-exécuté.
+
 ---
-**Sécurité Garantie :** L'agent IA n'a **aucune** capacité d'exécuter `bw delete` de lui-même. S'il tente d'envoyer 50 payloads de suppression discrètement, l'écran de `kpihx` sera inondé de pop-ups ⚠️ RED ALERT que seul le Master Password (connu exclusivement du cerveau humain) peut déverrouiller.
+**Sécurité Garantie :** L'agent IA n'a **aucune** capacité d'exécuter `bw delete` de lui-même. S'il tente d'envoyer 50 payloads de suppression discrètement, l'écran de `kpihx` sera inondé de pop-ups ⚠️ RED ALERT que seul le Master Password (connu exclusivement du cerveau humain) peut déverrouiller. En cas de la moindre incohérence technique en vol, le Moteur de Rollback annihilera silencieusement le reste de la transaction pour protéger les données.
