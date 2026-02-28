@@ -37,7 +37,32 @@ class WALManager:
         }
         with open(WAL_FILE, 'w') as f:
             json.dump(data, f, indent=2)
+    @staticmethod
+    def pop_rollback_command(transaction_id: str):
+        """
+        Removes the last rollback command from the WAL and saves it.
+        This ensures that if a rollback crashes mid-way, the next boot
+        won't rerun already-successful commands (Idempotency).
+        """
+        if not os.path.exists(WAL_FILE):
+            return
             
+        try:
+            with open(WAL_FILE, 'r') as f:
+                data = json.load(f)
+        except json.JSONDecodeError:
+            return
+            
+        if data.get("transaction_id") == transaction_id:
+            cmds = data.get("rollback_commands", [])
+            if cmds:
+                # The latest command executed is at the end of the stack,
+                # which corresponds exactly to the first command of the LIFO execution list
+                cmds.pop()
+                data["rollback_commands"] = cmds
+                with open(WAL_FILE, 'w') as f:
+                    json.dump(data, f, indent=2)
+
     @staticmethod
     def clear_wal():
         """

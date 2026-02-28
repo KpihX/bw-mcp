@@ -19,6 +19,7 @@ class TransactionManager:
     
     @staticmethod
     def _perform_rollback(
+        tx_id: str,
         rollback_stack: List[Dict[str, Any]],
         session_key: str
     ) -> Dict[str, Any]:
@@ -45,6 +46,10 @@ class TransactionManager:
                     # Strip "bw" — SecureSubprocessWrapper.execute prepends it automatically
                     SecureSubprocessWrapper.execute(args[1:], session_key)
                     executed.append(" ".join(args))
+                    
+                    # 💡 Consume the executed command from WAL incrementally
+                    WALManager.pop_rollback_command(tx_id)
+                    
             return {"success": True, "executed": executed, "failed_cmd": None, "error": None}
         except Exception as e:
             # Identify the single command that failed via O(1) index
@@ -73,7 +78,7 @@ class TransactionManager:
         tx_id = wal_data.get("transaction_id", "UNKNOWN")
         rollback_stack = wal_data.get("rollback_commands", [])
         
-        result = TransactionManager._perform_rollback(rollback_stack, session_key)
+        result = TransactionManager._perform_rollback(tx_id, rollback_stack, session_key)
         
         # Synthetic Pydantic payload used to produce a log entry for this recovery event
         mock_payload = TransactionPayload(
@@ -183,8 +188,8 @@ class TransactionManager:
                 failed_op = payload.operations[idx].model_dump(exclude_none=True)
                 
             logger_status = TransactionStatus.ROLLBACK_TRIGGERED
-            # Delegate to the shared engine — no WAL mutation inside
-            rb_result = TransactionManager._perform_rollback(rollback_stack, session_key)
+            # Delegate to the shared engine — no WAL mutation inside (except popping)
+            rb_result = TransactionManager._perform_rollback(tx_id, rollback_stack, session_key)
             
             executed_rolled_back_cmds = rb_result["executed"]
             failed_rollback_cmd = rb_result["failed_cmd"]
