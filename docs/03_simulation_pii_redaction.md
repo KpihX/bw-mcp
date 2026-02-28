@@ -2,7 +2,23 @@
 
 Ce document présente comment le BW-Blind-Proxy gère l'édition des types sensibles (Identity, Card) et des champs personnalisés tout en bloquant toute fuite de secret.
 
+[ ⬅️ 02: Organization ](02_simulation_vault_organization.md) | [ 04: Extreme Edge ➡️ ](04_simulation_extreme_edge.md)
+
 ---
+
+## 🏗️ Architecture du Blind-Validator
+
+```text
+       [ LLM Payload ]                     [ Pydantic Models ]
+              |                                     |
+      (01) Action Check -----------------> [ EditItemIdentityAction ]
+              |                                     |
+      (02) Field Scan --------------------> [ extra="forbid" ]
+              |                                     |
+      (03) Human Popup <---------- [ OK ] <---------+
+              |
+      (04) SUBPROCESS LOCK <--- [ MASTER PW ] -- (bw edit item)
+```
 
 ## 🎭 Le Scénario d'Édition Avancée
 L'utilisateur `kpihx` dit à l'agent IA :

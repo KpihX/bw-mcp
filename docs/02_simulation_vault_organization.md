@@ -2,7 +2,21 @@
 
 Ce document détaille comment le proxy gère une réorganisation massive du coffre en utilisant la polyvalence de l'outil `propose_vault_transaction`.
 
+[ ⬅️ 01: Core Protocol ](01_simulation_core_protocol.md) | [ 03: PII Redaction ➡️ ](03_simulation_pii_redaction.md)
+
 ---
+
+## 🏗️ Architecture du Workflow d'Organisation
+
+```text
+       [ LLM Payload ]
+              |
+      (01) create_folder ----> [ BW TEMPLATE ] ----> [ RAW JSON ] ----> (bw create folder)
+              |
+      (02) rename_item   ----> [ FETCH ITEM ]  ----> [ FULL JSON ] ----> (bw edit item)
+              |                     |                       |
+      (03) edit_item_login <--------+ (In-Memory Merge) <---+
+```
 
 ## 🎭 Le Scénario d'Organisation
 L'utilisateur `kpihx` dit à l'agent IA :

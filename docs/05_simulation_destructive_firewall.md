@@ -2,7 +2,23 @@
 
 Ce document retrace le cheminement exact d'un octet lorsqu'une opération **destructrice** est déclenchée (ex: suppression de dossier ou de mot de passe).
 
+[ ⬅️ 04: Extreme Edge ](04_simulation_extreme_edge.md) | [ Finish: README ➡️ ](../README.md)
+
 ---
+
+## 🏗️ Architecture du Destructive Firewall
+
+```text
+       [ AI Agent ]
+              |
+      (01) propose_transaction ----> [ TransactionManager ]
+                                            |
+      (02) DETECT "delete_*" ----> [ HITL RED ALERT ] ----> [ ZENITY UI ]
+                                            |                      |
+      (03) HUMAN APPROVAL <-----------------+ <---------- [ WARNING ICON ]
+              |
+      (04) MASTER PASSWORD ----> [ BW UNLOCK ] ----> (bw delete item)
+```
 
 ## 🎭 Le Scénario de Danger
 L'utilisateur `kpihx` dit à l'agent IA :

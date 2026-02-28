@@ -8,9 +8,28 @@ It strongly enforces the **"AI-Blind Management"** philosophy. You can ask an AI
 
 ---
 
-## 🏗️ The Architecture of the Proxy
+The transparency of this proxy is its greatest strength. Follow the **[Visual Simulation Path](docs/01_simulation_core_protocol.md)** to see every byte in motion.
 
-The transparency of this proxy is its greatest strength. Here is exactly how an AI interacts with your vault.
+### 🎥 The Zero-Trust Interactive Path
+If you want to understand the codebase, read the documentation in this specific order:
+1. **[Core Protocol](docs/01_simulation_core_protocol.md)**: How we unlock and wipe RAM.
+2. **[Vault Organization](docs/02_simulation_vault_organization.md)**: AI Batching and Orchestration.
+3. **[PII & Card Defense](docs/03_simulation_pii_redaction.md)**: Shielding your Identity and Credit Cards.
+4. **[Advanced Edge Features](docs/04_simulation_extreme_edge.md)**: Trash, Collections, and Attachments.
+5. **[The Destructive Firewall](docs/05_simulation_destructive_firewall.md)**: How Zenity prevents AI hallucinations from deleting your life.
+
+```text
+       [ USER PROMPT ]
+              |
+      (01) CORE READ ----> [ REDACTION LAYER ] ----> (03) PII SHIELD
+              |                  |                         |
+      (02) BATCH WRITE <---------+ <-----------------------+
+              |
+      (05) FIREWALL (Human-In-The-Loop) ----> [ BITWARDEN VAULT ]
+```
+
+### Flow Visualization: How the Proxy Works
+Here is exactly how an AI interacts with your vault.
 
 ```text
 ================================================================================
@@ -26,8 +45,8 @@ The transparency of this proxy is its greatest strength. Here is exactly how an 
       |                                     | -- 3. bw unlock -----------> |
       |                                     | <- Vault JSON (Uncensored) - |
       |                                     |                                |
-      |   (Pydantic Validation Firewall)    |                                |
-      |   * Redact 'password', 'totp' *     |                                |
+      |   (Pydantic Validation Firewall)    |  [ See: docs/01_simulation_core_protocol.md ]
+      |   * Redact 'password', 'totp' *     |  [ See: docs/03_simulation_pii_redaction.md ]
       |   * Redact 'CVV', 'SSN', etc. *     |                                |
       |                                     |                                |
       | <- 4. Sanitized Structural Map ---- |                                |
@@ -43,13 +62,13 @@ The transparency of this proxy is its greatest strength. Here is exactly how an 
       |                                     |   (Enum Schema Validation)     |
       |                                     |   * extra="forbid" aborts *    |
       |                                     |                                |
-      |                                     | -- 6. Zenity UI POPUP        | |
+      |                                     | -- 6. Zenity UI POPUP        | | [ See: docs/05_simulation_destructive_firewall.md ]
       |                                     | <- User clicks 'Approve' --- | |
       |                                     |                                |
-      |                                     | -- 7. bw edit item --------> |
+      |                                     | -- 7. bw edit item --------> | [ See: docs/02_simulation_vault_organization.md ]
       |                                     | <- Vault Updated ----------- |
       |                                     |                                |
-      | <- 8. Success Message ------------- |   (Memory Wipe to 0x00)        |
+      | <- 8. Success Message ------------- |   (Memory Wipe to 0x00)        | [ See: docs/01_simulation_core_protocol.md ]
       |                                     |                                |
 ```
 
@@ -58,10 +77,12 @@ The transparency of this proxy is its greatest strength. Here is exactly how an 
 1. **AI-Blind Read Operations:** The AI reads structural metadata. `password`, `totp`, `notes` (Secure Notes), `number` (CC), `code` (CVV), `ssn` (Identity), `passportNumber`, and "Hidden" Custom Fields are instantly overwritten by Pydantic before the LLM sees the JSON.
    - If the original field is filled, the AI sees `"[REDACTED_BY_PROXY_POPULATED]"`.
    - If the field is blank or missing, the AI sees `"[REDACTED_BY_PROXY_EMPTY]"`.
-   - **Benefit:** The AI can warn you if an important password or 2FA seed is missing, without ever having read the actual cryptographic data.
+   - **Deep Dive:** Read **[03_simulation_pii_redaction.md](docs/03_simulation_pii_redaction.md)** for more.
 2. **Strict Polymorphic Pydantic Schemas:** The AI **CANNOT** execute wild bash commands. It can only propose from a hardcoded list of 15 `Enum` atomic actions. If a rogue AI tries to slip `"password": "hacked"` into a `RenameItem` payload, Pydantic's `extra="forbid"` rule immediately detonates the payload and aborts the transaction.
 3. **Hardware-Level Memory Wiping:** The `BW_SESSION` key and your Master Password are fundamentally obliterated from Python memory immediately after usage. Instead of relying on Python's Garbage Collector (which leaves strings floating in RAM for hackers to dump), the proxy converts keys to raw `bytearray` matrices and systematically overwrites them with zeroes (`0x00`).
+   - **Deep Dive:** Read **[01_simulation_core_protocol.md](docs/01_simulation_core_protocol.md)**.
 4. **Red Alerts on Destructive Actions:** Modifying an item logs a blue UI prompt. Deleting an item/folder triggers a native Red Warning Zenity Box to guarantee a human doesn't sleepwalk into approving an AI's destructive hallucination.
+   - **Deep Dive:** Read **[05_simulation_destructive_firewall.md](docs/05_simulation_destructive_firewall.md)**.
 
 ---
 
@@ -115,6 +136,16 @@ To make **BW-Blind-Proxy** exhaustively complete, we implemented these historica
    - Added `ItemAction.TOGGLE_REPROMPT` (Master Password reprompt flag).
 
 This design guarantees that *every single non-sensitive lever* in Bitwarden is directly, explicitly, and securely accessible by the LLM via Pydantic Enums, while not a single cryptographic or PII secret can ever leak.
+
+### 🦾 The "Extreme Edge" (Phase 4 Logic)
+For organizational perfection, the Proxy handles advanced states without ever touching the secret keys:
+
+```text
+    [ TRASH ] <--- restore_item --- [ PROXY ] --- delete_attachment ---> [ FILES ]
+                                       |
+    [ ORG   ] <--- move_to_coll --- [ PROXY ] --- toggle_reprompt  ---> [ RE-AUTH ]
+```
+**Deep Dive:** Explore how these complex subcommands are executed in **[04_simulation_extreme_edge.md](docs/04_simulation_extreme_edge.md)**.
 
 ---
 

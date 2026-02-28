@@ -2,7 +2,23 @@
 
 Ce document illustre comment le BW-Blind-Proxy gère les opérations les plus spécialisées et rares de Bitwarden : la gestion de la Corbeille, le transfert vers les Organisations (Entreprise), la suppression de pièces jointes, et l'exigence de Reprompt du Master Password.
 
+[ ⬅️ 03: PII Redaction ](03_simulation_pii_redaction.md) | [ 05: Destructive Firewall ➡️ ](05_simulation_destructive_firewall.md)
+
 ---
+
+## 🏗️ Architecture du Pipeline de Phase 4
+
+```text
+       [ LLM Payload ]                     [ Bitwarden CLI ]
+              |                                     |
+      (01) ACTION: RESTORE ---------------> (bw restore_item)
+              |                                     |
+      (02) ACTION: ATTACHMENT ------------> (bw delete_attachment)
+              |                                     |
+      (03) ACTION: ORG MOVE --------------> (bw move_to_collection)
+              |                                     |
+      (04) ACTION: REPROMPT <--- [ PURE JSON ] --- (bw edit_item)
+```
 
 ## 🎭 Le Scénario de Sécurité Maximale
 L'utilisateur `kpihx` dit à l'agent IA :
