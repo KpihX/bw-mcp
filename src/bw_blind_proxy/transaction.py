@@ -2,7 +2,10 @@ import json
 import copy
 import uuid
 from typing import List, Dict, Any, Callable, Tuple, Optional
-from .models import TransactionPayload, VaultTransactionAction, ItemAction, FolderAction, EditAction
+from .models import (
+    TransactionPayload, VaultTransactionAction, ItemAction, 
+    FolderAction, EditAction, TransactionStatus
+)
 from .subprocess_wrapper import SecureSubprocessWrapper, SecureBWError
 from .ui import HITLManager
 from .wal import WALManager
@@ -37,7 +40,7 @@ class TransactionManager:
             
             # Log the successful recovery
             mock_payload = TransactionPayload(rationale="Hard-crash detected upon startup. System auto-recovered via WAL.", operations=[])
-            TransactionLogger.log_transaction(tx_id, mock_payload, "CRASH_RECOVERED_ON_BOOT")
+            TransactionLogger.log_transaction(tx_id, mock_payload, TransactionStatus.CRASH_RECOVERED_ON_BOOT)
             
             return f"WARNING: A previous critical crash was detected. The proxy automatically executed a full WAL rollback to restore Vault integrity. The previous transaction {tx_id} was aborted."
         except Exception as e:
@@ -68,9 +71,14 @@ class TransactionManager:
             return f"Transaction failed during unlock: {str(e)}"
             
         results = []
+        executed_ops = []
+        failed_op = None
+        executed_rolled_back_cmds = []
+        failed_rollback_cmd = None   # Only ONE cmd can fail per LIFO sequential pass
+        
         rollback_stack: List[Dict[str, Any]] = []
         tx_id = str(uuid.uuid4())
-        logger_status = "SUCCESS"
+        logger_status = TransactionStatus.SUCCESS
         logger_err = None
         
         # Initialize WAL
@@ -81,6 +89,9 @@ class TransactionManager:
                 msg, rollback_cmds = TransactionManager._execute_single_action(op, session_key)
                 results.append(msg)
                 
+                # Operation succeeded, record it (excluding the rationale)
+                executed_ops.append(op.model_dump(exclude_none=True))
+                
                 if rollback_cmds:
                     # Append commands in reverse to maintain LIFO execution during rollback
                     rollback_stack.extend(reversed(rollback_cmds))
@@ -90,22 +101,61 @@ class TransactionManager:
             return "Transaction completed successfully.\n" + "\n".join(results)
         except Exception as main_err:
             logger_err = str(main_err)
-            logger_status = "ROLLBACK_TRIGGERED"
+            
+            # Since the current op caused the exception, it's not in executed_ops
+            # We can deduce the failed operation by looking at the len of executed_ops
+            idx = len(executed_ops)
+            if idx < len(payload.operations):
+                failed_op = payload.operations[idx].model_dump(exclude_none=True)
+                
+            logger_status = TransactionStatus.ROLLBACK_TRIGGERED
             try:
+                # Materialise once to allow O(1)-index access later if rollback crashes
+                rollback_lifo_list = list(reversed(rollback_stack))
                 # Execute Rollback via LIFO reading of the RAM stack
-                for rb_cmd in reversed(rollback_stack):
+                for rb_cmd in rollback_lifo_list:
                     args = rb_cmd.get("cmd", [])
                     if args and args[0] == "bw":
                         # Strip "bw" from args because SecureSubprocessWrapper.execute prepends it automatically
                         SecureSubprocessWrapper.execute(args[1:], session_key)
+                        executed_rolled_back_cmds.append(" ".join(args))
                 WALManager.clear_wal()
-                logger_status = "ROLLBACK_SUCCESS"
-                return f"CRITICAL: Transaction failed at an operation ({str(main_err)}). A full rollback was successfully performed. Vault is pristine."
+                logger_status = TransactionStatus.ROLLBACK_SUCCESS
+                
+                err_msg = f"CRITICAL: Transaction failed during the following operation:\n{json.dumps(failed_op, indent=2)}\n\nError: {str(main_err)}\n\n"
+                err_msg += f"A full rollback was successfully performed. The {len(executed_rolled_back_cmds)} commands executed to revert your previous {len(executed_ops)} operations have reversed the vault back to its pristine state."
+                return err_msg
             except Exception as fatal_err:
-                logger_status = "ROLLBACK_FAILED"
-                return f"FATAL ERROR: Transaction failed, AND the rollback mechanism also failed. Vault is in an inconsistent state! Reason: {str(fatal_err)}"
+                logger_status = TransactionStatus.ROLLBACK_FAILED
+                
+                # Same O(1) index pattern as failed_op: the failing cmd is just past the last succeeded one
+                rb_idx = len(executed_rolled_back_cmds)
+                if rb_idx < len(rollback_lifo_list):
+                    args = rollback_lifo_list[rb_idx].get("cmd", [])
+                    failed_rollback_cmd = " ".join(args)
+                
+                # Enrich logger_err with the full error chain for total log transparency
+                logger_err = f"ExecutionError: {str(main_err)} | RollbackError: {str(fatal_err)}"
+                    
+                fatal_msg = f"FATAL ERROR: Transaction failed, AND the rollback mechanism also failed. Vault is in an inconsistent state!\n"
+                fatal_msg += f"Execution Error: {str(main_err)}\n"
+                fatal_msg += f"Rollback Error: {str(fatal_err)}\n\n"
+                fatal_msg += f"The following rollback commands successfully executed before crash: {json.dumps(executed_rolled_back_cmds)}\n"
+                fatal_msg += f"The command that failed to rollback: {failed_rollback_cmd}\n"
+                
+                return fatal_msg
         finally:
-            TransactionLogger.log_transaction(tx_id, payload, logger_status, logger_err)
+            # Pass all tracing info directly to the logic logger using kwargs
+            TransactionLogger.log_transaction(
+                transaction_id=tx_id, 
+                payload=payload, 
+                status=logger_status, 
+                error_message=logger_err,
+                executed_ops=executed_ops,
+                failed_op=failed_op,
+                executed_rolled_back_cmds=executed_rolled_back_cmds,
+                failed_rollback_cmd=failed_rollback_cmd
+            )
             sk_bytes = bytearray(session_key, 'utf-8')
             for i in range(len(sk_bytes)):
                 sk_bytes[i] = 0

@@ -5,6 +5,7 @@ from rich.table import Table
 
 from .logger import LOG_DIR
 from .wal import WALManager
+from .models import TransactionStatus
 
 app = typer.Typer(help="BW-Blind-Proxy Management & Audit CLI")
 console = Console()
@@ -67,9 +68,9 @@ def view_logs(n: int = typer.Option(5, help="Number of latest logs to view")):
                 rat_str = rat_str[:72] + "..."
                 
             stat_color = "green"
-            if "RECOVERED" in status.upper():
+            if status == TransactionStatus.CRASH_RECOVERED_ON_BOOT:
                 stat_color = "yellow"
-            elif any(x in status.upper() for x in ["FAIL", "ABORT", "ROLLBACK"]):
+            elif status in [TransactionStatus.ROLLBACK_TRIGGERED, TransactionStatus.ROLLBACK_SUCCESS, TransactionStatus.ROLLBACK_FAILED, TransactionStatus.ABORTED]:
                 stat_color = "red"
                 
             status_f = f"[{stat_color}]{status}[/{stat_color}]"

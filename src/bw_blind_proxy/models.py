@@ -30,6 +30,14 @@ class EditAction(StrEnum):
     IDENTITY = "edit_item_identity"
     CUSTOM_FIELD = "upsert_custom_field"
 
+class TransactionStatus(StrEnum):
+    SUCCESS = "SUCCESS"                            # Batch finished perfectly
+    ROLLBACK_TRIGGERED = "ROLLBACK_TRIGGERED"      # Error caught, starting reversal
+    ROLLBACK_SUCCESS = "ROLLBACK_SUCCESS"          # Error caught and vault restored to pristine state
+    ROLLBACK_FAILED = "ROLLBACK_FAILED"            # CRITICAL: Both execution and recovery failed
+    CRASH_RECOVERED_ON_BOOT = "CRASH_RECOVERED_ON_BOOT"  # Found and cleared an orphan WAL file
+    ABORTED = "ABORTED"                            # Human cancelled the Zenity prompt
+
 
 # -----------------
 # DATA FETCH MODELS (Sanitized Views)

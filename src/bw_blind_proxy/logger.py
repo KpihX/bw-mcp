@@ -2,7 +2,7 @@ import json
 import os
 import datetime
 from typing import List, Dict, Any
-from .models import TransactionPayload
+from .models import TransactionPayload, TransactionStatus
 from .config import STATE_DIR
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -25,8 +25,12 @@ class TransactionLogger:
     def log_transaction(
         transaction_id: str,
         payload: TransactionPayload,
-        status: str,
-        error_message: str = None
+        status: TransactionStatus,
+        error_message: str = None,
+        executed_ops: List[Dict[str, Any]] = None,
+        failed_op: Dict[str, Any] = None,
+        executed_rolled_back_cmds: List[str] = None,
+        failed_rollback_cmd: str = None  # Only ONE cmd can fail in a sequential LIFO pass
     ) -> str:
         """
         Writes a detailed execution report to a local flat file.
@@ -62,9 +66,34 @@ class TransactionLogger:
             op_action = op.get("action", "unknown")
             op_target = op.get("target_id", "New Creation")
             report.append(f"  [{idx+1}] Action: {op_action} | Target: {op_target}")
-            # Do not log the entire payload of identities or cards to avoid meta-leakage, 
-            # though they are technically non-secrets, just keeping logs tight.
             
+        report.append("-" * 40)
+        report.append("[EXECUTION TRACE]")
+        if executed_ops:
+            for idx, e_op in enumerate(executed_ops):
+                act = e_op.get("action", "unknown")
+                tgt = e_op.get("target_id", "New Creation")
+                report.append(f"  [SUCCESS] -> {act} on {tgt}")
+        else:
+            report.append("  (No operations were successfully executed)")
+            
+        if failed_op:
+            f_act = failed_op.get("action", "unknown")
+            f_tgt = failed_op.get("target_id", "New Creation")
+            report.append(f"  [CRASHED] -> {f_act} on {f_tgt}")
+            
+        if status != TransactionStatus.SUCCESS:
+            report.append("-" * 40)
+            report.append("[ROLLBACK TRACE]")
+            if executed_rolled_back_cmds:
+                for r_cmd in executed_rolled_back_cmds:
+                    report.append(f"  [REVERSED] -> {r_cmd}")
+            else:
+                report.append("  (No rollback commands were executed)")
+                
+            if failed_rollback_cmd:
+                report.append(f"  [FAILED TO REVERT] -> {failed_rollback_cmd}")
+                    
         report.append("-" * 40)
         report.append("END OF LOG")
         
