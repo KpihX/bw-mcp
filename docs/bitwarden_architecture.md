@@ -53,8 +53,8 @@ Custom fields are incredibly versatile but dangerous.
   ],
   "username": "kpihx-x24",     // Visible to AI
   "password": "secret_pw_123", // SENSITIVE -> [REDACTED]
-  "totp": "6-digit-seed-base32",// SENSITIVE -> [REDACTED]
-  "fido2Credentials": []
+  "totp": "6-digit-seed-base32",// SENSITIVE -> [REDACTED]. Time-based One-Time Password seed (RFC 6238). Used to generate ephemeral 2FA codes.
+  "fido2Credentials": []       // Passkey/U2F hardware metadata. (REDACTED). List of registered security keys.
 }
 ```
 
@@ -89,24 +89,24 @@ Custom fields are incredibly versatile but dangerous.
 Identities contain personal identifiable information (PII). In an ultra-secure environment, elements like SSN or Passport form must be safeguarded.
 ```json
 {
-  "title": "Mr",
-  "firstName": "Ivann",
-  "middleName": "Harold",
-  "lastName": "Kamdem",
-  "address1": "Rue de l'Ecole Polytechnique",
-  "address2": "Bâtiment X24",
-  "address3": null,
-  "city": "Palaiseau",
-  "state": "IDF",
-  "postalCode": "91120",
-  "country": "FR",
-  "company": "Lokad",
-  "email": "kpihx@lokad.com",
-  "phone": "+33612345678",
-  "ssn": "1234567890123",      // SENSITIVE -> [REDACTED]
-  "username": "kpihx",
-  "passportNumber": "FRA-555", // SENSITIVE -> [REDACTED]
-  "licenseNumber": "LIC-999"   // SENSITIVE -> [REDACTED]
+  "title": "Mr",               // Formal title (Visible)
+  "firstName": "Ivann",        // First name (Visible)
+  "middleName": "Harold",      // Middle name (Visible)
+  "lastName": "Kamdem",        // Last name (Visible)
+  "address1": "Rue de l'Ecole Polytechnique", // Primary address (Visible)
+  "address2": "Bâtiment X24",  // Secondary address (Visible)
+  "address3": null,            // Tertiary address
+  "city": "Palaiseau",         // City (Visible)
+  "state": "IDF",              // State/Region (Visible)
+  "postalCode": "91120",       // Postal code (Visible)
+  "country": "FR",             // Country (Visible)
+  "company": "Lokad",          // Employer name (Visible)
+  "email": "kpihx@lokad.com",  // Contact email (Visible)
+  "phone": "+33612345678",      // Contact phone (Visible)
+  "ssn": "1234567890123",      // SENSITIVE (PII) -> [REDACTED]
+  "username": "kpihx",         // Identity username (Visible)
+  "passportNumber": "FRA-555", // SENSITIVE (PII) -> [REDACTED]
+  "licenseNumber": "LIC-999"   // SENSITIVE (PII) -> [REDACTED]
 }
 ```
 **Proxy Rule:** The proxy will redact `ssn`, `passportNumber`, and `licenseNumber`. The AI can read and edit the standard address and contact info.
