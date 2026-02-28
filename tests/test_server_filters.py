@@ -9,17 +9,14 @@ import bw_blind_proxy.server as server
 @patch('bw_blind_proxy.server.HITLManager.ask_master_password')
 @patch('bw_blind_proxy.server.SecureSubprocessWrapper.unlock_vault')
 @patch('bw_blind_proxy.server.SecureSubprocessWrapper.execute_json')
-def test_get_vault_map_search_parameter(mock_exec_json, mock_unlock, mock_ask):
-    """Ensure search argument maps to --search for both items and folders."""
+def test_get_vault_map_split_search(mock_exec_json, mock_unlock, mock_ask):
+    """Ensure search_items and search_folders route correctly to their respective base args."""
     mock_ask.return_value = "pw"
     mock_unlock.return_value = "session"
     mock_exec_json.return_value = []
     
-    # Run the original unwrapped function manually to avoid FastMCP context issues
-    # With fastmcp.tool(), the tool logic is callable directly in Python
-    server.get_vault_map(search="Lokad")
+    server.get_vault_map(search_items="Lokad", search_folders="Dev")
     
-    # Verify the execute_json calls
     calls = mock_exec_json.call_args_list
     assert len(calls) == 6 # Active Items, Active Folders, Trash Items, Trash Folders, Organizations, Collections
     
@@ -27,21 +24,39 @@ def test_get_vault_map_search_parameter(mock_exec_json, mock_unlock, mock_ask):
     assert calls[0][0][0] == ["list", "items", "--search", "Lokad"]
     
     # Check Active Folders call
-    assert calls[1][0][0] == ["list", "folders", "--search", "Lokad"]
+    assert calls[1][0][0] == ["list", "folders", "--search", "Dev"]
 
 @patch('bw_blind_proxy.server.HITLManager.ask_master_password')
 @patch('bw_blind_proxy.server.SecureSubprocessWrapper.unlock_vault')
 @patch('bw_blind_proxy.server.SecureSubprocessWrapper.execute_json')
-def test_get_vault_map_trash_only(mock_exec_json, mock_unlock, mock_ask):
-    """Ensure trash_only skips fetching active items to speed up the proxy."""
+def test_get_vault_map_trash_state_none(mock_exec_json, mock_unlock, mock_ask):
+    """Ensure trash_state='none' skips fetching the trash."""
     mock_ask.return_value = "pw"
     mock_unlock.return_value = "session"
     mock_exec_json.return_value = []
     
-    server.get_vault_map(trash_only=True)
+    server.get_vault_map(trash_state="none")
     
     calls = mock_exec_json.call_args_list
-    # With trash_only=True and include_orgs=True, we expect 4 calls: 
+    # Active Items, Active Folders, Organizations, Collections
+    assert len(calls) == 4
+    
+    assert calls[0][0][0] == ["list", "items"]
+    assert calls[1][0][0] == ["list", "folders"]
+    assert calls[2][0][0] == ["list", "organizations"]
+    
+@patch('bw_blind_proxy.server.HITLManager.ask_master_password')
+@patch('bw_blind_proxy.server.SecureSubprocessWrapper.unlock_vault')
+@patch('bw_blind_proxy.server.SecureSubprocessWrapper.execute_json')
+def test_get_vault_map_trash_state_only(mock_exec_json, mock_unlock, mock_ask):
+    """Ensure trash_state='only' skips fetching active items to speed up the proxy."""
+    mock_ask.return_value = "pw"
+    mock_unlock.return_value = "session"
+    mock_exec_json.return_value = []
+    
+    server.get_vault_map(trash_state="only")
+    
+    calls = mock_exec_json.call_args_list
     # Trash Items, Trash Folders, Organizations, Collections
     assert len(calls) == 4
     

@@ -16,17 +16,18 @@ mcp = FastMCP(SERVER_NAME)
 
 @mcp.tool()
 def get_vault_map(
-    search: Optional[str] = None,
+    search_items: Optional[str] = None,
+    search_folders: Optional[str] = None,
     folder_id: Optional[str] = None,
     collection_id: Optional[str] = None,
     organization_id: Optional[str] = None,
-    trash_only: bool = False,
+    trash_state: str = "all",
     include_orgs: bool = True
 ) -> str:
     """
     Retrieves the vault (Items and Folders) in a strictly sanitized format.
-    Supports advanced filtering (search, folder_id, collection_id, organization_id, trash_only) 
-    to narrow down results and save context.
+    Supports advanced filtering (search_items, search_folders, folder_id, collection_id, organization_id) 
+    and a tri-state filter for the trash (trash_state="none", "only", or "all").
     The agent CANNOT see passwords, TOTP tokens, or secure notes.
     This action requires the Master Password once to unlock the vault temporarily.
     """
@@ -38,13 +39,13 @@ def get_vault_map(
         
     try:
         items_base_args = ["list", "items"]
-        if search: items_base_args.extend(["--search", search])
+        if search_items: items_base_args.extend(["--search", search_items])
         if folder_id: items_base_args.extend(["--folderid", folder_id])
         if collection_id: items_base_args.extend(["--collectionid", collection_id])
         if organization_id: items_base_args.extend(["--organizationid", organization_id])
         
         folders_base_args = ["list", "folders"]
-        if search: folders_base_args.extend(["--search", search])
+        if search_folders: folders_base_args.extend(["--search", search_folders])
         
         folders = []
         items = []
@@ -53,22 +54,23 @@ def get_vault_map(
         organizations = []
         collections = []
 
-        if not trash_only:
-            # Fetch Active
+        if trash_state in ["none", "all"]:
+            # Fetch Active (Not deleted)
             raw_items = SecureSubprocessWrapper.execute_json(items_base_args, session_key)
             items = [BlindItem(**i).model_dump(exclude_unset=True) for i in raw_items]
             
             raw_folders = SecureSubprocessWrapper.execute_json(folders_base_args, session_key)
             folders = [BlindFolder(**f).model_dump(exclude_unset=True) for f in raw_folders]
             
-        # Fetch Deleted (Trash) using the same filters
-        trash_items_args = items_base_args + ["--trash"]
-        raw_trash_items = SecureSubprocessWrapper.execute_json(trash_items_args, session_key)
-        trash_items = [BlindItem(**i).model_dump(exclude_unset=True) for i in raw_trash_items]
-        
-        trash_folders_args = folders_base_args + ["--trash"]
-        raw_trash_folders = SecureSubprocessWrapper.execute_json(trash_folders_args, session_key)
-        trash_folders = [BlindFolder(**f).model_dump(exclude_unset=True) for f in raw_trash_folders]
+        if trash_state in ["only", "all"]:
+            # Fetch Deleted (Trash) using the same filters
+            trash_items_args = items_base_args + ["--trash"]
+            raw_trash_items = SecureSubprocessWrapper.execute_json(trash_items_args, session_key)
+            trash_items = [BlindItem(**i).model_dump(exclude_unset=True) for i in raw_trash_items]
+            
+            trash_folders_args = folders_base_args + ["--trash"]
+            raw_trash_folders = SecureSubprocessWrapper.execute_json(trash_folders_args, session_key)
+            trash_folders = [BlindFolder(**f).model_dump(exclude_unset=True) for f in raw_trash_folders]
         
         if include_orgs:
             raw_orgs = SecureSubprocessWrapper.execute_json(["list", "organizations"], session_key)

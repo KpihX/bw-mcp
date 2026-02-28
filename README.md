@@ -102,14 +102,18 @@ Here is exactly how an AI interacts with your vault.
 
 The Proxy exposes exactly **two** tools to the AI Agent. This drastically limits the attack surface while enabling profound orchestration capabilities.
 
-### 1. `get_vault_map(search, folder_id, collection_id, organization_id, trash_only, include_orgs)`
+### 1. `get_vault_map(search_items, search_folders, folder_id, collection_id, organization_id, trash_state, include_orgs)`
 **Description:** Fetches the structural map of the Bitwarden vault, filtering out all secrets securely via Pydantic before transmission. Supports native Bitwarden CLI filtering to drastically reduce the context window and speed up searches.
 *   **Input (AI provides):** All arguments are optional.
-    *   `search` (str): Search in names and metadata.
+    *   `search_items` (str): Search specifically in item names, metadata, or URIs.
+    *   `search_folders` (str): Search specifically in folder names.
     *   `folder_id` (str): Filter items by a specific folder UUID.
     *   `collection_id` (str): Filter items by a specific collection UUID.
     *   `organization_id` (str): Filter items/collections by org UUID.
-    *   `trash_only` (bool): If true, fetches *only* the Trash (saves time).
+    *   `trash_state` (str, default="all"): Tri-state filter for Trash fetching:
+        *   `"none"`: Fetch ONLY active vaults. (Maximizes speed and minimizes tokens).
+        *   `"only"`: Fetch ONLY the trash. (Useful for finding items to restore).
+        *   `"all"`: Fetch everything.
     *   `include_orgs` (bool): If false, skips fetching the Organization mappings.
 *   **Output (AI receives):** A sanitized JSON containing `folders`, `items`, `trash_items`, `trash_folders`, `organizations`, and `collections`.
 

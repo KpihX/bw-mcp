@@ -11,7 +11,7 @@ Ce document explique comment l'agent IA peut utiliser les filtres avancés du pr
 ```text
        [ LLM Prompt ]
               |
-      (01) get_vault_map(search="Lokad", folder_id="uuid-dev", trash_only=False)
+      (01) get_vault_map(search_items="Lokad", folder_id="uuid-dev", trash_state="none")
               |
       (02) Argument Builder --------> [ ["list", "items", "--search", "Lokad", "--folderid", "uuid-dev"] ]
               |
@@ -36,13 +36,12 @@ L'agent IA analyse le premier ordre et exploite les paramètres optionnels de l'
 
 **Appel de l'IA :**
 ```python
-get_vault_map(search="Lokad", folder_id="uuid-proj26")
+get_vault_map(search_items="Lokad", trash_state="none", folder_id="uuid-proj26")
 ```
 
 **Ce que fait le Proxy :**
-Il traduit cela en appels natifs ultra-rapides pour la CLI Bitwarden :
+Il traduit cela en appels natifs ultra-rapides pour la CLI Bitwarden, et esquive totalement les recherches de dossiers (car `search_folders` n'est pas fourni) ou la corbeille (car `trash_state="none"`):
 - `bw list items --search "Lokad" --folderid "uuid-proj26"`
-- `bw list folders --search "Lokad"`
 
 **Le Résultat Pydantic :**
 Le JSON de retour est minuscule. Il ne contient *que* les 3 éléments Lokad dans le bon dossier. Tous les champs sensibles (`password`, `totp`) sont toujours strictement remplacés par `[REDACTED_BY_PROXY_POPULATED]`. **L'IA n'a consommé que 300 tokens pour chercher une aiguille dans une meule de foin de 5000 items.**
@@ -53,11 +52,11 @@ L'agent IA analyse le deuxième ordre (chercher 'Slack' dans la corbeille).
 
 **Appel de l'IA :**
 ```python
-get_vault_map(search="Slack", trash_only=True)
+get_vault_map(search_items="Slack", search_folders="Slack", trash_state="only")
 ```
 
 **Ce que fait le Proxy :**
-Le paramètre `trash_only=True` est crucial. Il dit au proxy de squizzer complètement la récupération des milliers d'items actifs (`bw list items`). Il n'exécute **que** :
+Le paramètre `trash_state="only"` est crucial. Il dit au proxy de squizzer complètement la récupération des milliers d'items et dossiers actifs. Il n'exécute **que** :
 - `bw list items --search "Slack" --trash`
 - `bw list folders --search "Slack" --trash`
 
