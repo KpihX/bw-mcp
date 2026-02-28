@@ -5,7 +5,6 @@ from typing import List, Dict, Any
 from .models import TransactionPayload, TransactionStatus
 from .config import STATE_DIR
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 LOG_DIR = os.path.join(STATE_DIR, "logs")
 
 class TransactionLogger:
@@ -27,7 +26,7 @@ class TransactionLogger:
         payload: TransactionPayload,
         status: TransactionStatus,
         error_message: str = None,
-        executed_ops: List[Dict[str, Any]] = None,
+        executed_ops: List[str] = None,
         failed_op: Dict[str, Any] = None,
         executed_rolled_back_cmds: List[str] = None,
         failed_rollback_cmd: str = None  # Only ONE cmd can fail in a sequential LIFO pass
@@ -70,10 +69,10 @@ class TransactionLogger:
         report.append("-" * 40)
         report.append("[EXECUTION TRACE]")
         if executed_ops:
-            for idx, e_op in enumerate(executed_ops):
-                act = e_op.get("action", "unknown")
-                tgt = e_op.get("target_id", "New Creation")
-                report.append(f"  [SUCCESS] -> {act} on {tgt}")
+            for msg in executed_ops:
+                # msg usually starts with '-> ' from transaction logic
+                clean_msg = msg.lstrip('-> ').strip()
+                report.append(f"  [SUCCESS] -> {clean_msg}")
         else:
             report.append("  (No operations were successfully executed)")
             

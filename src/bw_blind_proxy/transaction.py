@@ -150,7 +150,7 @@ class TransactionManager:
             return f"Transaction failed during unlock: {str(e)}"
             
         results = []
-        executed_ops = []
+        executed_ops: List[str] = []
         failed_op = None
         executed_rolled_back_cmds = []
         failed_rollback_cmd = None   # Only ONE cmd can fail per LIFO sequential pass
@@ -168,8 +168,8 @@ class TransactionManager:
                 msg, rollback_cmds = TransactionManager._execute_single_action(op, session_key)
                 results.append(msg)
                 
-                # Operation succeeded, record it (excluding empty fields)
-                executed_ops.append(op.model_dump(exclude_none=True))
+                # Operation succeeded, record its human-readable message trace
+                executed_ops.append(msg)
                 
                 if rollback_cmds:
                     # Append commands in reverse to maintain LIFO execution during rollback
