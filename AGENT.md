@@ -29,4 +29,8 @@ Whenever modifying the codebase (adding an Action, changing a schema, changing t
 5. **AGENT.md:** Update the tracked feature parity/action count.
 
 ## 🧠 Knowledge Retention
-The agent must proactively update the `README.md` and this `AGENT.md` as the project evolves. Current status: **17 `StrEnum` Actions** deployed for 100% API coverage.
+The agent must proactively update the `README.md` and this `AGENT.md` as the project evolves. Current status: 
+- **17 `StrEnum` Actions** deployed for 100% API coverage.
+- **ACID Transaction Engine** (Virtual Vault -> Disk WAL -> Execution) active.
+- **Auditing CLI** active (`bw-proxy logs` & `bw-proxy purge`).
+- **Internalized Configuration** active (`config.yaml` & `config.py`).

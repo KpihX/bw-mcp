@@ -1,18 +1,10 @@
-logging:
-  level: "INFO"
-  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-
 proxy:
   # The name of the server exposed by MCP
   name: "BW-Blind-Proxy"
-  # How long (in seconds) the in-memory session is kept before being scrubbed
-  # 0 means scrub immediately after each batch
-  session_timeout: 0
 
-ui:
-  # Choices: 'zenity', 'tkinter'
-  # Zenity is preferred for seamless Linux native dialogs
-  prompt_engine: "zenity"
+  # The centralized directory where logs and WAL are stored.
+  # Relative paths or ~ are supported.
+  state_directory: "~/.bw-blind-proxy"
 
 redaction:
   # The tags used by the proxy to explicitly inform the AI about secret statuses

@@ -374,3 +374,23 @@ class TransactionPayload(BaseModel):
     
     operations: List[VaultTransactionAction]
     rationale: str = Field(..., description="Explain to the host human why you are proposing these exact changes.")
+
+    @model_validator(mode='after')
+    def isolate_unrecoverable_actions(self) -> 'TransactionPayload':
+        """
+        Enforce that unrecoverable actions (like delete_attachment)
+        must be executed as a standalone transaction to minimize collateral risk.
+        """
+        has_attachment_deletion = any(
+            op.action == ItemAction.DELETE_ATTACHMENT for op in self.operations
+        )
+        
+        if has_attachment_deletion and len(self.operations) > 1:
+            raise ValueError(
+                "CRITICAL SECURITY RULE: The 'delete_attachment' action is UNRECOVERABLE (bypasses Bitwarden Trash). "
+                "Because it cannot be rolled back safely if another operation in the batch fails, "
+                "you MUST send this action completely isolated in its own batch of size 1. "
+                "Do not bundle it with other operations."
+            )
+            
+        return self

@@ -1,6 +1,5 @@
 import subprocess
 from typing import List, Any
-from .config import load_config
 from .models import TransactionPayload
 
 class HITLManager:

@@ -21,24 +21,51 @@ def test_valid_polymorphic_payload():
     assert payload.operations[2].action == ItemAction.FAVORITE
 
 def test_extreme_edge_actions():
-    """Ensure Phase 4 Extreme Edge Actions (Restore, Reprompt, Attachments) parse correctly."""
+    """Ensure Phase 4 Extreme Edge Actions (Restore, Reprompt) parse correctly."""
     raw = {
         "rationale": "Deep organizational operations",
         "operations": [
             {"action": "restore_item", "target_id": "test-id"},
             {"action": "toggle_reprompt", "target_id": "test-id", "reprompt": True},
-            {"action": "delete_attachment", "target_id": "test-id", "attachment_id": "attach-99"},
             {"action": "move_to_collection", "target_id": "test-id", "organization_id": "org-55"},
             {"action": "restore_folder", "target_id": "folder-id"}
         ]
     }
     payload = TransactionPayload(**raw)
-    assert len(payload.operations) == 5
+    assert len(payload.operations) == 4
     assert payload.operations[0].action == ItemAction.RESTORE
     assert payload.operations[1].reprompt is True
-    assert payload.operations[2].attachment_id == "attach-99"
-    assert payload.operations[3].organization_id == "org-55"
-    assert payload.operations[4].action == FolderAction.RESTORE
+    assert payload.operations[2].organization_id == "org-55"
+    assert payload.operations[3].action == FolderAction.RESTORE
+
+def test_delete_attachment_must_be_standalone():
+    """Ensure that the proxy fiercely rejects grouping delete_attachment with other actions."""
+    raw_invalid = {
+        "rationale": "I am trying to rename and then delete an attachment",
+        "operations": [
+            {"action": "rename_item", "target_id": "test-id", "new_name": "My Cleaned Item"},
+            {"action": "delete_attachment", "target_id": "test-id", "attachment_id": "attach-99"}
+        ]
+    }
+    
+    with pytest.raises(ValidationError) as exc_info:
+        TransactionPayload(**raw_invalid)
+        
+    assert "UNRECOVERABLE" in str(exc_info.value)
+
+def test_delete_attachment_standalone_success():
+    """Ensure that executing delete_attachment strictly alone passes validation."""
+    raw_valid = {
+        "rationale": "Deleting old tax returns",
+        "operations": [
+            {"action": "delete_attachment", "target_id": "test-id", "attachment_id": "attach-99"}
+        ]
+    }
+    
+    payload = TransactionPayload(**raw_valid)
+    assert len(payload.operations) == 1
+    assert payload.operations[0].action == ItemAction.DELETE_ATTACHMENT
+    assert payload.operations[0].attachment_id == "attach-99"
 
 def test_create_item_forbids_secrets():
     """Ensure that creating a shell item explicitly rejects password or other secrets."""

@@ -74,15 +74,31 @@ Dans `transaction.py`, le subprocess wrapper récupère la session évanescente.
 La session est instantanément convertie en zéros dans la RAM (bytearray wipe).
 L'agent IA, qui était "gelé" (en attente du serveur) pendant tout ce processus, reçoit la chaîne `"Transaction completed successfully."` et annonce à l'humain que son coffre a été purgé de ses anciens éléments.
 
-## 🎬 PHASE 4 : Atomicity & The Rollback Engine
+### PHASE 4: Atomicity, The Rollback Engine, and Auditing
 
-Si le payload contenait 10 opérations, et qu'une erreur réseau ou de validation CLI survient à la **9ème opération**, que se passe-t-il ?
-Le proxy garantit une **atomicité stricte ("Tout ou Rien")**.
+The proxy intercepts this instruction. Because the user is manipulating two distinct entries, the proxy wraps the entire operation in a strict **ACID-compliant Virtual Vault Transaction**:
 
-1. **Snapshotting :** Avant chaque opération (ex: renommer, déplacer), le proxy crée une sauvegarde JSON de l'état initial de l'item en RAM.
-2. **LIFO Stack :** À chaque succès, une fonction de "compensation" est ajoutée au sommet d'une pile (Ex: si on a fait un "delete folder", la fonction de compensation sera un "restore folder").
-3. **Le Rollback :** Dès la détection du crash sur l'opération 9, le proxy stoppe l'exécution, puis dépile la pile en sens inverse (LIFO). Il exécute les annulations pour les opérations 8, 7, 6... jusqu'à 1.
-4. **Conclusion :** L'agent IA reçoit un message indiquant `CRITICAL: Transaction failed... A full rollback was successfully performed. Vault is pristine.`. Le coffre est revenu à son état exact de départ, évitant tout état corrompu ou semi-exécuté.
+1. **Virtual Execution (RAM):** The proxy pulls the current records into isolated memory blocks. It virtually simulates assigning `favorite: false` to item A and `delete` to Item B.
+2. **Write-Ahead Logging (Disk):** Recognizing that deleting an item is destructive, it mathematically deduces the reverse logic (`bw restore B` and `bw edit A`). It serializes these commands and securely writes them to a local JSON disk log (`~/.bw_blind_proxy/logs/wal/pending_transaction.json`).
+3. **Execution & The Firewall:**
+    *   The OS intercepts the subprocess. Zenity freezes the desktop.
+    *   "**Do you wish to permit `antigravity` to un-favorite `Mail` and DELETE `Old Notes`?**"
+    *   The human visually validates. They enter the password.
+4. **Resiliency to `kill -9` / Power Outages:** If the PC crashes right after `bw edit A` finishes but *before* `bw delete B`, the system restarts. The prompt automatically checks the `WAL` and recognizes a trapped transaction. It executes `bw edit A (revert)` backwards, restoring pristine vault integrity.
+5. **Immutable Auditing:** All actions are finalized. A strict, password and credential-free log is dumped. The Human can later inspect this via the bundled Typer CLI:
+
+```bash
+uv run bw-proxy logs
+```
+
+```
+Last 5 Transactions (Anti-Gravity Vault Audit)
+[2026-02-28 09:28] c070d585-ba21-4b94-b065-4be725a0bb5b SUCCESS
+Rationale: "Removing obsolete backup codes to clean workspace."
+Operations: Edit Item (Favorite=False), Delete Item.
+```
+
+**Outcome:** The proxy has successfully operated as a flawless barrier. The Assistant confidently managed the organization tasks without **ever** touching or even "seeing" the plaintext passwords behind the items. And the user has a permanent audit trail.
 
 ---
 **Sécurité Garantie :** L'agent IA n'a **aucune** capacité d'exécuter `bw delete` de lui-même. S'il tente d'envoyer 50 payloads de suppression discrètement, l'écran de `kpihx` sera inondé de pop-ups ⚠️ RED ALERT que seul le Master Password (connu exclusivement du cerveau humain) peut déverrouiller. En cas de la moindre incohérence technique en vol, le Moteur de Rollback annihilera silencieusement le reste de la transaction pour protéger les données.

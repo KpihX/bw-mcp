@@ -34,8 +34,13 @@ def get_vault_map(
     try:
         master_password = HITLManager.ask_master_password(title="Proxy Request: Read Vault Map")
         session_key = SecureSubprocessWrapper.unlock_vault(master_password)
+        
+        recovery_msg = TransactionManager.check_recovery(session_key)
+        if recovery_msg:
+            return recovery_msg
+            
     except Exception as e:
-        return f"Access Denied: {str(e)}"
+        return f"Access Denied or Recovery Failed: {str(e)}"
         
     try:
         items_base_args = ["list", "items"]
@@ -109,9 +114,15 @@ def get_vault_map(
         del session_key
 
 @mcp.tool()
-def propose_vault_transaction(payload: Dict[str, Any]) -> str:
+def propose_vault_transaction(rationale: str, operations: List[Dict[str, Any]]) -> str:
     """
     Propose a batch of modifications to the vault. Very strict schemas apply.
+    
+    [🛡️ ACID & WAL RESILIENCE]
+    The transaction runs locally in RAM via a "Virtual Vault Mode". 
+    If validation passes, a Write-Ahead Log is created. 
+    Only then is the 'bw' CLI executed. If the proxy process is killed mid-flight, 
+    the system auto-recovers natively (LIFO rollback) on the next operation!
     
     The payload must be a JSON object containing:
       - "rationale": A string explaining why these changes are being made.
@@ -126,7 +137,8 @@ def propose_vault_transaction(payload: Dict[str, Any]) -> str:
           6. "favorite_item" -> Requires: target_id (str), favorite (bool)
           7. "move_to_collection" -> Requires: target_id (str), organization_id (str).
           8. "toggle_reprompt" -> Requires: target_id (str), reprompt (bool).
-          9. "delete_attachment" -> Requires: target_id (str), attachment_id (str). WARNING: Destructive.
+          9. "delete_attachment" -> Requires: target_id (str), attachment_id (str). 
+             WARNING: Destructive & UNRECOVERABLE. MUST be the ONLY operation in the batch.
           
           [FOLDER ACTIONS]
           9. "create_folder" -> Requires: name (str)
@@ -146,6 +158,10 @@ def propose_vault_transaction(payload: Dict[str, Any]) -> str:
     the operations. The user must explicitly type their Master Password to approve 
     and execute the batch transaction. Destructive actions trigger RED ALERTS.
     """
+    payload = {
+        "rationale": rationale,
+        "operations": operations
+    }
     try:
         # Pass the raw dictionary to the Transaction Manager
         return TransactionManager.execute_batch(payload)

@@ -2,7 +2,7 @@
 
 Ce document explique comment l'agent IA peut utiliser les filtres avancés du proxy pour explorer un coffre contenant des milliers d'items de manière extrêmement ciblée, sans faire exploser sa fenêtre de contexte.
 
-[ ⬅️ 06: Safe Creation ](06_simulation_safe_creation.md) | [ Back to README ➡️ ](../README.md)
+[ ⬅️ 06: Safe Creation ](06_simulation_safe_creation.md) | [ 08: ACID WAL Resilience ➡️ ](08_simulation_acid_wal_resilience.md)
 
 ---
 

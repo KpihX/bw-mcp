@@ -1,0 +1,14 @@
+TRANSACTION ID: 110b3bed-a3b8-4ee0-9cec-3dd950e2d118
+TIMESTAMP:      2026-02-28T09:26:57.198131
+STATUS:         ROLLBACK_SUCCESS
+ERROR:          Simulated failure
+----------------------------------------
+RATIONALE:
+  Rollback test
+----------------------------------------
+OPERATIONS REQUESTED:
+  [1] Action: rename_item | Target: item1
+  [2] Action: create_folder | Target: New Creation
+  [3] Action: delete_folder | Target: fail_folder
+----------------------------------------
+END OF LOG

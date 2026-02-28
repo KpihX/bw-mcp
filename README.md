@@ -18,6 +18,8 @@ If you want to understand the codebase, read the documentation in this specific 
 4. **[Advanced Edge Features](docs/04_simulation_extreme_edge.md)**: Trash, Collections, and Attachments.
 5. **[The Destructive Firewall](docs/05_simulation_destructive_firewall.md)**: How Zenity prevents AI hallucinations from deleting your life.
 6. **[Safe Creation](docs/06_simulation_safe_creation.md)**: How the AI spawns empty shell items without polluting secrets.
+7. **[Advanced Search Filtering](docs/07_simulation_advanced_search.md)**: How the AI optimizes context tokens using the precise backend queries.
+8. **[ACID Resilience & WAL](docs/08_simulation_acid_wal_resilience.md)**: How the Proxy auto-recovers from an OS-level blackout without dataloss.
 
 ```text
    [ USER PROMPT ]  : "IpihX, rename my GitHub account and move it to Dev."
@@ -142,11 +144,11 @@ The Proxy exposes exactly **two** tools to the AI Agent. This drastically limits
 ```
 
 ### 2. `propose_vault_transaction(rationale, operations)`
-**Description:** Submits a batch of operations (create, edit, delete, move, etc.) for execution. 
-*   **Security & Atomicity guarantees:**
-    *   **Human-In-The-Loop:** The payload is intercepted by a Zenity popup. The human must visually review the operations and enter the Master Password.
-    *   **Strict Polymorphism:** Pydantic strictly validates each operation type. The AI *cannot* specify `password`, `totp`, or `cvv` fields. Any deviation throws a schema error before execution.
-    *   **Snapshot & Rollback Engine (All-or-Nothing):** If the transaction involves 10 actions and fails on the 10th, the proxy automatically executes LIFO compensating actions (restoring deleted folders, un-renaming items, deleting hallucinated creations) to leave the vault in a pristine state.
+**Description:** Submits a batch of operations (create, edit, delete, move, etc.) for execution.
+*   **Absolute Agent-Blindness:** The AI operates exclusively on sanitized payloads (Pydantic `extra="ignore"` for reads, `extra="forbid"` for writes). Passwords, TOTPs, CVVs, and secure notes are mathematically scrubbed before reaching the context window.
+*   **Human-in-The-Loop Execution:** All write operations trigger a massive Zenity UI popup detailing the exact operations intent. The human must visually authorize the batch and enter the Master Password.
+*   **ACID Transaction Engine:** A full 3-phase Commit engine (Virtual Vault RAM Simulation $\rightarrow$ Disk Write-Ahead Log $\rightarrow$ LIFO Rollback) guarantees mathematical consistency. The vault is never left in an uncommitted state even upon network failure or `kill -9` process interruptions.
+*   **Auditing & CLI:** Every modification request is written to a human-readable, secret-stripped log in `logs/transactions/`. A dedicated Typer/Rich CLI (`bw-proxy logs`) allows you to view the latest modifications beautifully in the terminal.
 *   **Input (AI provides):**
     *   `rationale` (str): A direct message to the user explaining *why* the AI wants to do this.
     *   `operations` (List[VaultTransactionAction]): An array of polymorphic action objects.
@@ -179,23 +181,40 @@ ValidationError: 1 validation error for TransactionPayload... Extra inputs are n
 
 ---
 
+## 🛠️ Architecture
+
+```mermaid
+graph TD
+    A[Agent Workspace (Claude/Gemini)] -->|Tool Call| B[FastMCP Server]
+    B -->|Sanitized Read| C[Pydantic Models]
+    C -->|Redacted Payload| A
+    B -->|Write Intention| D[Virtual Vault & WAL Engine]
+    D -->|Zenity UI Prompts| E[Human Approval + Master Password]
+    E -->|Write-Ahead Log Serialization| F[(Local WAL Disk)]
+    F -->|Secure Execution| G[subprocess `bw` CLI]
+    G -->|Success| H[Clear WAL + Write Audit Log]
+    G -->|Failure/Crash| I[LIFO Crash Recovery]
+```
+
+---
+
 ## 🛠️ Exhaustive API Coverage (17 Enum Actions)
 
 The proxy maps Bitwarden's complex CLI into 17 robust, completely secure internal Enums.
 
 ### Item Organization (`ItemAction`)
-1. **`create_item`**: Spawns an empty shell (Login, Note, Card, Identity) locally. Strictly blocks LLM from creating secrets safely.
-2. **`rename_item`**: Safely alters the name of a secret.
-2. **`move_item`**: Reparents an item inside a specific Folder UUID.
-3. **`favorite_item`**: Toggles the star/favorite status.
-4. **`delete_item`**: [🚨 RED ALERT] Removes item to the Trash.
-5. **`restore_item`**: [Phase 4 Edge] Recovers an item from the Trash.
-6. **`toggle_reprompt`**: [Phase 4 Edge] Enables/Disables Master Password Reprompt requirement for specific high-value items.
-7. **`move_to_collection`**: [Phase 4 Edge] Enterprise Organization sharing mapping.
-8. **`delete_attachment`**: [Phase 4 Edge] Forcefully removes physical file attachments.
+1.  **`create_item`**: Spawns an empty shell (Login, Note, Card, Identity) locally. Strictly blocks LLM from creating secrets safely.
+2.  **`rename_item`**: Safely alters the name of a secret.
+2.  **`move_item`**: Reparents an item inside a specific Folder UUID.
+3.  **`favorite_item`**: Toggles the star/favorite status.
+4.  **`delete_item`**: [🚨 RED ALERT] Removes item to the Trash.
+5.  **`restore_item`**: [Phase 4 Edge] Recovers an item from the Trash.
+6.  **`toggle_reprompt`**: [Phase 4 Edge] Enables/Disables Master Password Reprompt requirement for specific high-value items.
+7.  **`move_to_collection`**: [Phase 4 Edge] Enterprise Organization sharing mapping.
+8.  **`delete_attachment`**: [Phase 4 Edge] Forcefully removes physical file attachments.
 
 ### Folder Operations (`FolderAction`)
-9. **`create_folder`**: Instantiates a new logical grouping.
+9.  **`create_folder`**: Instantiates a new logical grouping.
 10. **`rename_folder`**: Self-explanatory.
 11. **`delete_folder`**: [🚨 RED ALERT] Deletes the folder (does not delete the items inside, they go to root).
 12. **`restore_folder`**: [Phase 4 Edge] Recovers a folder from the Trash.
@@ -221,19 +240,110 @@ For organizational perfection, the Proxy handles advanced states without ever to
 
 ---
 
-## 🚀 Installation & Usage
+## 🔒 Security Posture & ACID Compliance
 
-### Requirements
-- Python `>= 3.12`
-- `uv` package manager (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
-- `bw` (Bitwarden CLI) installed and logged in.
-- `zenity` installed on Linux (`sudo apt install zenity`) for the GUI prompts.
+The core philosophy of **BW-Blind-Proxy** is **Zero-Trust for the AI, Total-Reliability for the Human**. We achieve this by treating Bitwarden modifications as database transactions.
 
-### Build and Install Globally
-Provide the tool to your system via `uv`:
-```bash
-uv tool install . --force
+### 📜 What is ACID?
+We implement the four pillars of database reliability to protect your vault:
+*   **A - Atomicity (Atomicité) :** Every batch of operations is "All-or-Nothing". If one rename fails, all preceding creates/deletes in that batch are automatically reversed.
+*   **C - Consistency (Cohérence) :** Data is validated against strict Pydantic models in a **Virtual Vault** (RAM) before hitting the CLI.
+*   **I - Isolation :** Each transaction is processed in its own secure session context.
+*   **D - Durability (Durabilité) :** Once a transaction starts, its intent is written to disk. It survives process death (`kill -9`) and power outages.
+
+### 🛡️ WAL: Write-Ahead Logging (D-Durability)
+To guarantee **Durability**, we use a **WAL Engine**. 
+1. **The Log First:** Before `bw` executes any destructive command, the proxy serializes the **Compensating Action** (Rollback).
+2. **Atomic Recovery:** Upon any tool call (like `get_vault_map`), the proxy first checks for a stranded WAL. If found, it forces a vault repair **before** allowing further actions.
+
+---
+
+## ⚙️ Configuration & Internalization
+
+Following the developer mandate of **Independent Autonomous Packages**, the configuration is internalized within the package source.
+
+*   **Location:** `src/bw_blind_proxy/config.yaml`
+*   **Customization:** You can modify the `state_directory` to point to any location.
+
+```yaml
+# src/bw_blind_proxy/config.yaml
+state_directory: "~/.bw-blind-proxy"
 ```
+
+## 📂 Transparency & File Structure
+
+The proxy maintains a centralized state directory (configurable) for auditing and recovery: `~/.bw-blind-proxy/`
+
+```text
+~/.bw-blind-proxy/
+├── logs/                  # Immutable Audit Trail (Stripped of secrets)
+│   ├── 2026-02-28_10-00-01_txid_success.log
+│   └── 2026-02-28_10-15-45_txid_rollback_triggered.log
+└── wal/                   # Recovery Engine (Ephemeral)
+    └── pending_transaction.json
+```
+
+### 🔍 Inside an Audit Log (`logs/*.log`)
+Extremely detailed but **100% blind to secrets**.
+```text
+TRANSACTION ID: c070d585-ba21-4b94-b065-4be725a0bb5b
+TIMESTAMP:      2026-02-28T10:00:01
+STATUS:         SUCCESS
+----------------------------------------
+RATIONALE:
+  Cleaning up obsolete dev credentials as discussed.
+----------------------------------------
+OPERATIONS REQUESTED:
+  [1] Action: edit_item_login | Target: 550e8400-e29b-41d4-a716-446655440000
+  [2] Action: delete_item | Target: 110b3bed-a3b8-4ee0-9cec-3dd950e2d118
+----------------------------------------
+END OF LOG
+```
+
+### 🔍 Inside a WAL Entry (`logs/wal/pending_transaction.json`)
+This file exists **only** during an active transaction to protect your data.
+```json
+{
+  "transaction_id": "tx-8892",
+  "timestamp": 1740733800.0,
+  "rollback_commands": [
+    { "cmd": ["bw", "restore", "item", "id-item-B"] },
+    { "cmd": ["bw", "edit", "item", "id-item-A", "{\"original_data\": \"...\"}"] }
+  ]
+}
+```
+
+---
+
+## 🔧 Installation & Commands
+
+Requires Python 3.12+ and `uv`.
+
+```bash
+# Clone the repository
+git clone [...]
+cd bw-blind-proxy
+
+# Install project and CLI binary using uv
+uv sync
+```
+
+### 🖥️ Native Auditing CLI (`bw-proxy`)
+
+The proxy features an underlying auditor capturing every structural modification intent.
+
+```bash
+# View the latest N transactions applied on your Bitwarden vault
+uv run bw-proxy logs --n=5
+
+# Delete old logs, keeping only the N most recent ones to free up space
+uv run bw-proxy purge --keep=10
+
+# Inspect the status of the local ACID Write-Ahead Log engine
+uv run bw-proxy wal
+```
+
+## 🔒 Security Posture & ACID Compliance
 
 ### Adding to an MCP Client
 Add the following to your Claude/Cursor configurations, or your `gemini-cli` config:
@@ -260,6 +370,8 @@ To truly trust a sovereign proxy, you must understand how it behaves in extreme 
 * `docs/04_simulation_extreme_edge.md`: *(See actual file for Phase 4 Trash/Collection/Reprompt capabilities)*.
 * `docs/05_simulation_destructive_firewall.md`: How the Red Alert systems protect against malicious AI deletions.
 * `docs/06_simulation_safe_creation.md`: How the AI creates safe empty shells without generating passwords.
+* `docs/07_simulation_advanced_search.md`: Precision mapping and search queries to limit LLM context bloat.
+* `docs/08_simulation_acid_wal_resilience.md`: 100% transparency on the crash-recovery and Typer Audit Logging mechanism.
 
 ---
 **Maintained with 100% transparency. Your secrets remain yours.**
