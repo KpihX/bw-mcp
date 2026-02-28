@@ -9,25 +9,25 @@ Every secret in Bitwarden is wrapped in a generic `Item` schema regardless of it
 
 ```json
 {
-  "passwordHistory": [],
-  "revisionDate": null,
-  "creationDate": null,
-  "deletedDate": null,
-  "archivedDate": null,
-  "organizationId": null,
-  "collectionIds": null,
-  "folderId": null,
-  "type": 1, // 1=Login, 2=SecureNote, 3=Card, 4=Identity
-  "name": "Item name",
-  "notes": "Some notes about this item.", // SENSITIVE (Could contain secrets)
-  "favorite": false,
-  "fields": [], // CUSTOM FIELDS ARRAY
-  "login": null, // Present if type==1
-  "secureNote": null, // Present if type==2
-  "card": null, // Present if type==3
-  "identity": null, // Present if type==4
-  "sshKey": null,
-  "reprompt": 0 // 0=No, 1=Ask Master Password explicitly on view
+  "passwordHistory": [],      // List of previous passwords (REDACTED)
+  "revisionDate": null,       // Last update timestamp
+  "creationDate": null,       // Date of creation (e.g., "2024-01-01T12:00:00Z")
+  "deletedDate": null,        // Present if in Trash (e.g., "2024-02-28T10:15:00Z")
+  "archivedDate": null,       // Present if archived
+  "organizationId": null,     // UUID of the organization if shared
+  "collectionIds": null,      // List of collection UUIDs
+  "folderId": "folder-123",   // UUID of parent folder (e.g., "b87...f92")
+  "type": 1,                  // 1=Login, 2=SecureNote, 3=Card, 4=Identity
+  "name": "GitHub Account",   // Visible item label
+  "notes": "My recovery key", // SENSITIVE (Could contain secrets) -> [REDACTED]
+  "favorite": true,           // Starred status
+  "fields": [],               // Array of CustomField objects
+  "login": { ... },           // Login details (if type 1)
+  "secureNote": { ... },      // Note details (if type 2)
+  "card": { ... },            // Credit Card details (if type 3)
+  "identity": { ... },        // Identity details (if type 4)
+  "sshKey": null,             // SSH primary key data
+  "reprompt": 0               // 0=Standard, 1=Ask Master Pw before viewing
 }
 ```
 
@@ -35,9 +35,9 @@ Every secret in Bitwarden is wrapped in a generic `Item` schema regardless of it
 Custom fields are incredibly versatile but dangerous.
 ```json
 {
-  "name": "Field name",
-  "value": "Some value",
-  "type": 0 // 0=Text, 1=Hidden (SENSITIVE), 2=Boolean, 3=Linked (SENSITIVE)
+  "name": "Security Question", // Label of the custom field
+  "value": "My Pet's Name",    // The actual stored data
+  "type": 0                    // 0=Text (Shown), 1=Hidden (REDACTED), 2=Boolean, 3=Linked
 }
 ```
 **Proxy Rule:** The AI can read/write `fields` where `type == 0` or `type == 2`. The AI must NEVER see the `value` of a field where `type == 1` or `type == 3` (they must be redacted like a standard password).
@@ -48,10 +48,12 @@ Custom fields are incredibly versatile but dangerous.
 *Already implemented safely.*
 ```json
 {
-  "uris": [],
-  "username": "jdoe",
-  "password": "myp@ssword123", // SENSITIVE
-  "totp": "JBSWY3DPEHPK3PXP", // SENSITIVE
+  "uris": [
+    { "uri": "https://github.com/login", "match": null } 
+  ],
+  "username": "kpihx-x24",     // Visible to AI
+  "password": "secret_pw_123", // SENSITIVE -> [REDACTED]
+  "totp": "6-digit-seed-base32",// SENSITIVE -> [REDACTED]
   "fido2Credentials": []
 }
 ```
@@ -71,12 +73,12 @@ Custom fields are incredibly versatile but dangerous.
 ## 4. Type 3: Card (Credit/Debit)
 ```json
 {
-  "cardholderName": "John Doe",
-  "brand": "visa",
-  "number": "4242424242424242", // SENSITIVE
-  "expMonth": "04",
-  "expYear": "2023",
-  "code": "123" // SENSITIVE (CVV)
+  "cardholderName": "I. Harold K. P.", // Holder name
+  "brand": "visa",            // Brand (e.g., "mastercard", "amex")
+  "number": "4000123456789010",// SENSITIVE -> [REDACTED]
+  "expMonth": "12",           // Expiry Month (Visible to AI)
+  "expYear": "2028",          // Expiry Year (Visible to AI)
+  "code": "555"               // SENSITIVE (CVV) -> [REDACTED]
 }
 ```
 **Proxy Rule:** To support Cards, we must explicitly redact `number` and `code`. The AI can only read/edit `cardholderName`, `brand`, `expMonth`, and `expYear`.
@@ -88,23 +90,23 @@ Identities contain personal identifiable information (PII). In an ultra-secure e
 ```json
 {
   "title": "Mr",
-  "firstName": "John",
-  "middleName": "William",
-  "lastName": "Doe",
-  "address1": "123 Any St",
-  "address2": "Apt #123",
+  "firstName": "Ivann",
+  "middleName": "Harold",
+  "lastName": "Kamdem",
+  "address1": "Rue de l'Ecole Polytechnique",
+  "address2": "Bâtiment X24",
   "address3": null,
-  "city": "New York",
-  "state": "NY",
-  "postalCode": "10001",
-  "country": "US",
-  "company": "Acme Inc.",
-  "email": "john@company.com",
-  "phone": "5555551234",
-  "ssn": "000-123-4567", // SENSITIVE
-  "username": "jdoe",
-  "passportNumber": "US-123456789", // SENSITIVE
-  "licenseNumber": "D123-12-123-12333" // SENSITIVE
+  "city": "Palaiseau",
+  "state": "IDF",
+  "postalCode": "91120",
+  "country": "FR",
+  "company": "Lokad",
+  "email": "kpihx@lokad.com",
+  "phone": "+33612345678",
+  "ssn": "1234567890123",      // SENSITIVE -> [REDACTED]
+  "username": "kpihx",
+  "passportNumber": "FRA-555", // SENSITIVE -> [REDACTED]
+  "licenseNumber": "LIC-999"   // SENSITIVE -> [REDACTED]
 }
 ```
 **Proxy Rule:** The proxy will redact `ssn`, `passportNumber`, and `licenseNumber`. The AI can read and edit the standard address and contact info.

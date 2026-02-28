@@ -3,10 +3,8 @@
 ## 🎯 Project Vision
 **BW-Blind-Proxy** is a sovereign Model Context Protocol (MCP) server designed to act as a security-hardened intermediary between Large Language Models (LLMs) and the Bitwarden CLI (`bw`). 
 
-The core philosophy is **"AI-Blind Management"**:
-- The AI can see metadata (item names, folder structure, login usernames).
-- The AI **CANNOT** see sensitive data (passwords, secure notes, TOTP seeds).
-- Sensitive fields are strictly sanitized (redacted or removed) before being sent to the LLM.
+- **AI-Blind Management:** Metadata is visible, secrets are redacted.
+- **Deep Illustration & Transparency:** "Illustration" is the core mandate. Every architectural layer and data structure must be visualized (ASCII art, schemas) and documented with concrete examples. NO abstraction without illustration.
 
 ## 🛠️ Engineering Standards
 - **Language:** Technical content, code, comments, and documentation must be in **ENGLISH ONLY**.
