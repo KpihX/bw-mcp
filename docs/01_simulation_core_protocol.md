@@ -90,8 +90,8 @@ Il prépare un appel à l'outil `propose_vault_transaction(payload)` dans `serve
 {
   "rationale": "I will rename your GitHub account to 'GitHub_Pro' and move it to the 'Dev' folder as you requested.",
   "operations": [
-    {"action": "rename", "target_id": "item-001", "new_value": "GitHub_Pro"},
-    {"action": "move", "target_id": "item-001", "new_value": "folder-777"}
+    {"action": "rename_item", "target_id": "item-001", "new_name": "GitHub_Pro"},
+    {"action": "move_item",   "target_id": "item-001", "folder_id": "folder-777"}
   ]
 }
 ```

@@ -79,23 +79,37 @@ L'agent IA, qui était "gelé" (en attente du serveur) pendant tout ce processus
 The proxy intercepts this instruction. Because the user is manipulating two distinct entries, the proxy wraps the entire operation in a strict **ACID-compliant Virtual Vault Transaction**:
 
 1. **Virtual Execution (RAM):** The proxy pulls the current records into isolated memory blocks. It virtually simulates assigning `favorite: false` to item A and `delete` to Item B.
-2. **Write-Ahead Logging (Disk):** Recognizing that deleting an item is destructive, it mathematically deduces the reverse logic (`bw restore B` and `bw edit A`). It serializes these commands and securely writes them to a local JSON disk log (`~/.bw_blind_proxy/logs/wal/pending_transaction.json`).
+2. **Write-Ahead Logging (Disk):** Recognizing that deleting an item is destructive, it mathematically deduces the reverse logic (`bw restore B` and `bw edit A`). It serializes these commands and securely writes them to a local JSON disk file (`~/.bw-blind-proxy/wal/pending_transaction.json`).
 3. **Execution & The Firewall:**
     *   The OS intercepts the subprocess. Zenity freezes the desktop.
     *   "**Do you wish to permit `antigravity` to un-favorite `Mail` and DELETE `Old Notes`?**"
     *   The human visually validates. They enter the password.
 4. **Resiliency to `kill -9` / Power Outages:** If the PC crashes right after `bw edit A` finishes but *before* `bw delete B`, the system restarts. The prompt automatically checks the `WAL` and recognizes a trapped transaction. It executes `bw edit A (revert)` backwards, restoring pristine vault integrity.
-5. **Immutable Auditing:** All actions are finalized. A strict, password and credential-free log is dumped. The Human can later inspect this via the bundled Typer CLI:
+5. **Immutable Auditing:** All actions are finalized. A strict, password and credential-free **JSON log** is dumped to `~/.bw-blind-proxy/logs/`. The Human can later inspect this via the bundled Typer CLI:
 
 ```bash
+# View the last 5 transactions in a rich table
 uv run bw-proxy logs
+
+# View the full JSON details of the most recent transaction
+uv run bw-proxy log
 ```
 
-```
-Last 5 Transactions (Anti-Gravity Vault Audit)
-[2026-02-28 09:28] c070d585-ba21-4b94-b065-4be725a0bb5b SUCCESS
-Rationale: "Removing obsolete backup codes to clean workspace."
-Operations: Edit Item (Favorite=False), Delete Item.
+```json
+{
+  "transaction_id": "c070d585-ba21-4b94-b065-4be725a0bb5b",
+  "timestamp": "2026-02-28T09:28:00",
+  "status": "SUCCESS",
+  "rationale": "Removing obsolete Netflix account and old projects folder.",
+  "operations_requested": [
+    {"action": "delete_item",   "target_id": "netflix-123"},
+    {"action": "delete_folder", "target_id": "folder-old"}
+  ],
+  "execution_trace": [
+    "Deleted item netflix-123",
+    "Deleted folder folder-old"
+  ]
+}
 ```
 
 **Outcome:** The proxy has successfully operated as a flawless barrier. The Assistant confidently managed the organization tasks without **ever** touching or even "seeing" the plaintext passwords behind the items. And the user has a permanent audit trail.
