@@ -1,5 +1,5 @@
 from mcp.server.fastmcp import FastMCP
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from .config import load_config
 from .subprocess_wrapper import SecureSubprocessWrapper, SecureBWError
@@ -15,9 +15,18 @@ SERVER_NAME = config.get("proxy", {}).get("name", "BW-Blind-Proxy")
 mcp = FastMCP(SERVER_NAME)
 
 @mcp.tool()
-def get_vault_map() -> str:
+def get_vault_map(
+    search: Optional[str] = None,
+    folder_id: Optional[str] = None,
+    collection_id: Optional[str] = None,
+    organization_id: Optional[str] = None,
+    trash_only: bool = False,
+    include_orgs: bool = True
+) -> str:
     """
-    Retrieves the entire vault (Items and Folders) in a strictly sanitized format.
+    Retrieves the vault (Items and Folders) in a strictly sanitized format.
+    Supports advanced filtering (search, folder_id, collection_id, organization_id, trash_only) 
+    to narrow down results and save context.
     The agent CANNOT see passwords, TOTP tokens, or secure notes.
     This action requires the Master Password once to unlock the vault temporarily.
     """
@@ -28,29 +37,45 @@ def get_vault_map() -> str:
         return f"Access Denied: {str(e)}"
         
     try:
-        # Fetch Folders
-        raw_folders = SecureSubprocessWrapper.execute_json(["list", "folders"], session_key)
-        folders = [BlindFolder(**f).model_dump(exclude_unset=True) for f in raw_folders]
+        items_base_args = ["list", "items"]
+        if search: items_base_args.extend(["--search", search])
+        if folder_id: items_base_args.extend(["--folderid", folder_id])
+        if collection_id: items_base_args.extend(["--collectionid", collection_id])
+        if organization_id: items_base_args.extend(["--organizationid", organization_id])
         
-        # Fetch Active Items
-        raw_items = SecureSubprocessWrapper.execute_json(["list", "items"], session_key)
-        items = [BlindItem(**i).model_dump(exclude_unset=True) for i in raw_items]
+        folders_base_args = ["list", "folders"]
+        if search: folders_base_args.extend(["--search", search])
         
-        # Fetch Deleted (Trash) Items
-        raw_trash = SecureSubprocessWrapper.execute_json(["list", "items", "--trash"], session_key)
-        trash_items = [BlindItem(**i).model_dump(exclude_unset=True) for i in raw_trash]
+        folders = []
+        items = []
+        trash_items = []
+        trash_folders = []
+        organizations = []
+        collections = []
+
+        if not trash_only:
+            # Fetch Active
+            raw_items = SecureSubprocessWrapper.execute_json(items_base_args, session_key)
+            items = [BlindItem(**i).model_dump(exclude_unset=True) for i in raw_items]
+            
+            raw_folders = SecureSubprocessWrapper.execute_json(folders_base_args, session_key)
+            folders = [BlindFolder(**f).model_dump(exclude_unset=True) for f in raw_folders]
+            
+        # Fetch Deleted (Trash) using the same filters
+        trash_items_args = items_base_args + ["--trash"]
+        raw_trash_items = SecureSubprocessWrapper.execute_json(trash_items_args, session_key)
+        trash_items = [BlindItem(**i).model_dump(exclude_unset=True) for i in raw_trash_items]
         
-        # Fetch Deleted (Trash) Folders
-        raw_trash_folders = SecureSubprocessWrapper.execute_json(["list", "folders", "--trash"], session_key)
+        trash_folders_args = folders_base_args + ["--trash"]
+        raw_trash_folders = SecureSubprocessWrapper.execute_json(trash_folders_args, session_key)
         trash_folders = [BlindFolder(**f).model_dump(exclude_unset=True) for f in raw_trash_folders]
         
-        # Fetch Organizations
-        raw_orgs = SecureSubprocessWrapper.execute_json(["list", "organizations"], session_key)
-        organizations = [BlindOrganization(**o).model_dump(exclude_unset=True) for o in raw_orgs]
-        
-        # Fetch Organization Collections
-        raw_cols = SecureSubprocessWrapper.execute_json(["list", "org-collections"], session_key)
-        collections = [BlindOrganizationCollection(**c).model_dump(exclude_unset=True) for c in raw_cols]
+        if include_orgs:
+            raw_orgs = SecureSubprocessWrapper.execute_json(["list", "organizations"], session_key)
+            organizations = [BlindOrganization(**o).model_dump(exclude_unset=True) for o in raw_orgs]
+            
+            raw_cols = SecureSubprocessWrapper.execute_json(["list", "org-collections"], session_key)
+            collections = [BlindOrganizationCollection(**c).model_dump(exclude_unset=True) for c in raw_cols]
         
         result = {
             "status": "success",
