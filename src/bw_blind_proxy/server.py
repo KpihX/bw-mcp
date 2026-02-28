@@ -3,7 +3,7 @@ from typing import Dict, Any, List
 
 from .config import load_config
 from .subprocess_wrapper import SecureSubprocessWrapper, SecureBWError
-from .models import BlindItem, BlindFolder, TransactionPayload
+from .models import BlindItem, BlindFolder, BlindOrganization, BlindOrganizationCollection, TransactionPayload
 from .transaction import TransactionManager
 from .ui import HITLManager
 
@@ -44,6 +44,14 @@ def get_vault_map() -> str:
         raw_trash_folders = SecureSubprocessWrapper.execute_json(["list", "folders", "--trash"], session_key)
         trash_folders = [BlindFolder(**f).model_dump(exclude_unset=True) for f in raw_trash_folders]
         
+        # Fetch Organizations
+        raw_orgs = SecureSubprocessWrapper.execute_json(["list", "organizations"], session_key)
+        organizations = [BlindOrganization(**o).model_dump(exclude_unset=True) for o in raw_orgs]
+        
+        # Fetch Organization Collections
+        raw_cols = SecureSubprocessWrapper.execute_json(["list", "org-collections"], session_key)
+        collections = [BlindOrganizationCollection(**c).model_dump(exclude_unset=True) for c in raw_cols]
+        
         result = {
             "status": "success",
             "message": "Vault map successfully retrieved. Sensitive fields are redacted.",
@@ -51,7 +59,9 @@ def get_vault_map() -> str:
                 "folders": folders,
                 "items": items,
                 "trash_items": trash_items,
-                "trash_folders": trash_folders
+                "trash_folders": trash_folders,
+                "organizations": organizations,
+                "collections": collections
             }
         }
         

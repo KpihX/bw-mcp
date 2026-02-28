@@ -9,7 +9,7 @@
 ## 🛠️ Engineering Standards
 - **Language:** Technical content, code, comments, and documentation must be in **ENGLISH ONLY**.
 - **Stack:** Python 3.12+, `uv` for dependency management, `mcp` Python SDK.
-- **Architecture:** Modular and decoupled. The MCP server must be usable by any agent (Claude Code, Gemini CLI, Cursor, etc.). Built mathematically on 15 `StrEnum` Actions for 100% API coverage with Pydantic polymorphism.
+- **Architecture:** Modular and decoupled. The MCP server must be usable by any agent (Claude Code, Gemini CLI, Cursor, etc.). Built mathematically on 17 `StrEnum` Actions for 100% API coverage with Pydantic polymorphism.
 - **Security First:** 
     - No caching of `BW_SESSION` keys in logs or persistent storage.
     - Mandatory sanitization of all output from the `bw` CLI.
@@ -20,5 +20,13 @@
 - **Exhaustive Documentation:** Every tool must have a clear description, parameter schema, and explained security implications.
 - **Full Verbose Validation:** Any validation scripts must follow the "Full Verbose" mandate defined in the global `GEMINI.md`.
 
+## ⏱️ Post-Action Mandates (The Zero-Trust Update Cycle)
+Whenever modifying the codebase (adding an Action, changing a schema, changing tool parameters), you **MUST** execute this checklist before declaring the task complete:
+1. **Tests:** Update `tests/` and ensure `uv run pytest -v` runs flawlessly.
+2. **Models:** Ensure `models.py` has `extra="forbid"` on any write payload and update the global Enum action counts.
+3. **README:** Update the "Exhaustive API Coverage" section with the new action(s) and architecture diagram if needed.
+4. **Docs:** Update or create the relevant simulation in `docs/` (ex: 01, 04, 06) with ASCII diagrams showing the exact data flow.
+5. **AGENT.md:** Update the tracked feature parity/action count.
+
 ## 🧠 Knowledge Retention
-The agent must proactively update the `README.md` and this `AGENT.md` as the project evolves, especially regarding tool definitions and security boundaries.
+The agent must proactively update the `README.md` and this `AGENT.md` as the project evolves. Current status: **17 `StrEnum` Actions** deployed for 100% API coverage.

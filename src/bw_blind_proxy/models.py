@@ -168,6 +168,22 @@ class BlindFolder(BaseModel):
     id: str
     name: str
 
+class BlindOrganization(BaseModel):
+    """Strict representation of a Bitwarden Organization."""
+    model_config = ConfigDict(extra="ignore")
+    
+    id: str
+    name: str
+
+class BlindOrganizationCollection(BaseModel):
+    """Strict representation of an Organization Collection."""
+    model_config = ConfigDict(extra="ignore")
+    
+    id: str
+    organizationId: str
+    name: str
+    externalId: Optional[str] = None
+
 
 # -----------------
 # TRANSACTION MODELS (POLYMORPHIC ACTIONS)

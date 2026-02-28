@@ -24,10 +24,46 @@ Ce document illustre comment le BW-Blind-Proxy gère les opérations les plus sp
 L'utilisateur `kpihx` dit à l'agent IA :
 > *"IpihX, j'ai fait une erreur, restaure le compte 'Projet Alpha' de la corbeille. Ensuite, déplace ce compte vers l'Organisation Lokad (id: org-lokad), active la demande de Master Password à chaque consultation, et supprime la pièce jointe 'vieux-logo.png' (id: att-55) qui ne sert plus à rien."*
 
-## 🎬 PHASE 0 : La Visibilité de la Corbeille
-Avant d'agir, l'agent IA doit savoir *quel* est l'UUID du compte "Projet Alpha".
-Le proxy gère cela intelligemment. L'outil `get_vault_map` exécute en coulisses `bw list items` **ET** `bw list items --trash`.
-Il renvoie à l'IA un JSON organisé avec deux tableaux distincts : `items` (le coffre actif) et `trash_items` (les éléments supprimés). L'IA peut donc scanner la corbeille et identifier l'UUID `projet-alpha-id` sans intervention humaine.
+## PHASE 0: La Visibilité Périphérique (Corbeille & Organisations)
+
+Dans le bloc classique (Phase 1), le proxy donne à l'IA la liste des `items` et `folders`.
+Cependant, pour permettre à l'IA d'interagir avec les éléments en périphérie du coffre, `get_vault_map` retourne aussi 4 tableaux très spécifiques :
+
+```json
+{
+  "status": "success",
+  "data": {
+    "folders": [...],
+    "items": [...],
+    "trash_items": [
+      {
+        "id": "old-netflix-id",
+        "name": "Netflix (Old)",
+        "type": 1
+      }
+    ],
+    "trash_folders": [...],
+    "organizations": [
+      {
+        "id": "org-lokad-id",
+        "name": "Lokad Corp"
+      }
+    ],
+    "collections": [
+      {
+        "id": "col-dev-id",
+        "organizationId": "org-lokad-id",
+        "name": "Dev Team Secrets"
+      }
+    ]
+  }
+}
+```
+
+**Pourquoi exposer ces données structurelles ?**
+- L'IA voit les items supprimés pour pouvoir proposer `restore_item`.
+- L'IA voit tes Organisations (Entreprises/Familles) et leurs Collections (Dossiers partagés) pour pouvoir forger l'action `move_to_collection` et deviner exactement quel ID d'organisation utiliser, sans te le demander en clair.
+- *Sécurité:* Ces structures sont des métadonnées pures (aucun secret). Le risque est nul.
 
 ## 🎬 PHASE 1 : La Forge du Payload (Enums)
 
