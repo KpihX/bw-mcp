@@ -71,9 +71,9 @@ Nous avons la session. Mais on ne donne pas tout de suite le JSON à l'IA. `serv
 Le JSON brut atterrit dans `server.py`. On boucle dessus avec Pydantic : `[BlindItem(**i) for i in raw_items]`.
 * Prenons l'item "GitHub". Pydantic lit les données.
 * Il voit la clé `password`. Mais le modèle `BlindItem` a une sous-classe `BlindLogin` qui contient un `@model_validator(mode='before')`.
-* **Exécution du validateur `force_redact` :** Avant même d'initialiser l'objet, Pydantic écrase brutalement `data['password'] = "[REDACTED_BY_PROXY]"`.
+* **Exécution du validateur `force_redact` :** Avant même d'initialiser l'objet, Pydantic écrase brutalement `data['password'] = "[REDACTED_BY_PROXY_POPULATED]"`.
 * Il voit la clé mystère ajoutée hier par les développeurs de Bitwarden : `recovery_codes_v2`. Mais le modèle a la directive `model_config = ConfigDict(extra="ignore")`. La clé `recovery_codes_v2` est foudroyée en vol et n'entre pas dans l'objet.
-* `BlindItem.model_dump(exclude_unset=True)` génère un dictionnaire propre. Le mot de passe (pourtant caviardé) est totalement supprimé du dictionnaire final grâce au flag `exclude=True` défini dans le Field.
+* `BlindItem.model_dump(exclude_unset=True)` génère un dictionnaire propre. Le mot de passe n'apparaît plus en clair, seule l'étiquette `[REDACTED_BY_PROXY_POPULATED]` (ou `EMPTY` si le champ était vide) survit pour informer l'IA de l'existence du champ de sécurité.
 
 ### 6. Le Retour à l'IA
 Le JSON purgé retourne à l'agent IA. 
