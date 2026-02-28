@@ -289,7 +289,7 @@ The proxy was killed mid-transaction (power cut, `kill -9`). On the next MCP too
 
 ### 📦 The WAL File: Your Last Line of Defense
 
-During every transaction execution, the proxy writes a **Write-Ahead Log** to `~/.bw-blind-proxy/wal/pending_transaction.json` **before** each CLI command is executed. The file is deleted once the batch completes (success or clean rollback). If it exists when the proxy starts, it's a crash signal.
+During every transaction execution, the proxy writes a **Write-Ahead Log** to `~/.bw_blind_proxy/wal/pending_transaction.json` **before** each CLI command is executed. The file is deleted once the batch completes (success or clean rollback). If it exists when the proxy starts, it's a crash signal.
 
 **Exact WAL file structure** (`pending_transaction.json`):
 
@@ -529,15 +529,15 @@ Following the developer mandate of **Independent Autonomous Packages**, the conf
 
 ```yaml
 # src/bw_blind_proxy/config.yaml
-state_directory: "~/.bw-blind-proxy"
+state_directory: "~/.bw_blind_proxy"
 ```
 
 ## 📂 Transparency & File Structure
 
-The proxy maintains a centralized state directory (configurable) for auditing and recovery: `~/.bw-blind-proxy/`
+The proxy maintains a centralized state directory (configurable) for auditing and recovery: `~/.bw_blind_proxy/`
 
 ```text
-~/.bw-blind-proxy/
+~/.bw_blind_proxy/
 ├── logs/                  # Immutable Audit Trail (Stripped of secrets) — JSON format
 │   ├── 2026-02-28_10-00-01_<uuid>_success.json
 │   ├── 2026-02-28_10-15-45_<uuid>_rollback_success.json

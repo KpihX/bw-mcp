@@ -79,13 +79,13 @@ L'agent IA, qui était "gelé" (en attente du serveur) pendant tout ce processus
 The proxy intercepts this instruction. Because the user is manipulating two distinct entries, the proxy wraps the entire operation in a strict **ACID-compliant Virtual Vault Transaction**:
 
 1. **Virtual Execution (RAM):** The proxy pulls the current records into isolated memory blocks. It virtually simulates assigning `favorite: false` to item A and `delete` to Item B.
-2. **Write-Ahead Logging (Disk):** Recognizing that deleting an item is destructive, it mathematically deduces the reverse logic (`bw restore B` and `bw edit A`). It serializes these commands and securely writes them to a local JSON disk file (`~/.bw-blind-proxy/wal/pending_transaction.json`).
+2. **Write-Ahead Logging (Disk):** Recognizing that deleting an item is destructive, it mathematically deduces the reverse logic (`bw restore B` and `bw edit A`). It serializes these commands and securely writes them to a local JSON disk file (`~/.bw_blind_proxy/wal/pending_transaction.json`).
 3. **Execution & The Firewall:**
     *   The OS intercepts the subprocess. Zenity freezes the desktop.
     *   "**Do you wish to permit `antigravity` to un-favorite `Mail` and DELETE `Old Notes`?**"
     *   The human visually validates. They enter the password.
 4. **Resiliency to `kill -9` / Power Outages:** If the PC crashes right after `bw edit A` finishes but *before* `bw delete B`, the system restarts. The prompt automatically checks the `WAL` and recognizes a trapped transaction. It executes `bw edit A (revert)` backwards, restoring pristine vault integrity.
-5. **Immutable Auditing:** All actions are finalized. A strict, password and credential-free **JSON log** is dumped to `~/.bw-blind-proxy/logs/`. The Human can later inspect this via the bundled Typer CLI:
+5. **Immutable Auditing:** All actions are finalized. A strict, password and credential-free **JSON log** is dumped to `~/.bw_blind_proxy/logs/`. The Human can later inspect this via the bundled Typer CLI:
 
 ```bash
 # View the last 5 transactions in a rich table
