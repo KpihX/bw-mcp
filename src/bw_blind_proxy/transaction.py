@@ -29,7 +29,7 @@ class TransactionManager:
         rollback_stack = wal_data.get("rollback_commands", [])
         
         try:
-            for rb_cmd in rollback_stack:
+            for rb_cmd in reversed(rollback_stack):
                 args = rb_cmd.get("cmd", [])
                 if args and args[0] == "bw":
                     SecureSubprocessWrapper.execute(args[1:], session_key)
@@ -82,9 +82,8 @@ class TransactionManager:
                 results.append(msg)
                 
                 if rollback_cmds:
-                    # Prepend commands to maintain LIFO execution during rollback
-                    for cmd in reversed(rollback_cmds):
-                        rollback_stack.insert(0, cmd)
+                    # Append commands in reverse to maintain LIFO execution during rollback
+                    rollback_stack.extend(reversed(rollback_cmds))
                     WALManager.write_wal(tx_id, rollback_stack)
                     
             WALManager.clear_wal()
@@ -93,8 +92,8 @@ class TransactionManager:
             logger_err = str(main_err)
             logger_status = "ROLLBACK_TRIGGERED"
             try:
-                # Execute Rollback from RAM stack (which perfectly mirrors the WAL on disk)
-                for rb_cmd in rollback_stack:
+                # Execute Rollback via LIFO reading of the RAM stack
+                for rb_cmd in reversed(rollback_stack):
                     args = rb_cmd.get("cmd", [])
                     if args and args[0] == "bw":
                         # Strip "bw" from args because SecureSubprocessWrapper.execute prepends it automatically
