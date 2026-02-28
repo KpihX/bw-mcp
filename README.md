@@ -98,6 +98,70 @@ Here is exactly how an AI interacts with your vault.
 4. **Red Alerts on Destructive Actions:** Modifying an item logs a blue UI prompt. Deleting an item/folder triggers a native Red Warning Zenity Box to guarantee a human doesn't sleepwalk into approving an AI's destructive hallucination.
    - **Deep Dive:** Read **[05_simulation_destructive_firewall.md](docs/05_simulation_destructive_firewall.md)**.
 
+## 🔌 MCP Tools Reference (Inputs & Outputs)
+
+The Proxy exposes exactly **two** tools to the AI Agent. This drastically limits the attack surface while enabling profound orchestration capabilities.
+
+### 1. `get_vault_map()`
+**Description:** Fetches the structural map of the Bitwarden vault, filtering out all secrets securely via Pydantic before transmission.
+*   **Input (AI provides):** None (No arguments required).
+*   **Output (AI receives):** A sanitized JSON containing `folders`, `items`, `trash_items`, `trash_folders`, `organizations`, and `collections`.
+
+**Example Output (What the AI sees):**
+```json
+{
+  "status": "success",
+  "data": {
+    "folders": [{"id": "uuid-folder-1", "name": "Work"}],
+    "items": [
+      {
+        "id": "uuid-item-1",
+        "name": "Lokad Intranet",
+        "type": 1,
+        "folderId": "uuid-folder-1",
+        "login": {
+            "username": "kpihx@lokad.com", 
+            "password": "[REDACTED_BY_PROXY_POPULATED]",
+            "totp": "[REDACTED_BY_PROXY_EMPTY]"
+        }
+      }
+    ],
+    "trash_items": [], "trash_folders": [], "organizations": [], "collections": []
+  }
+}
+```
+
+### 2. `propose_vault_transaction(payload)`
+**Description:** Accepts a batch of actions from the AI, strictly validates the schemas using `extra="forbid"`, displays a Human-in-The-Loop UI for approval, and securely edits the Bitwarden CLI.
+*   **Input (AI provides):** A JSON string matching the `TransactionPayload` schema (A rationale and a list of operations).
+
+**Example Input (How the AI asks):**
+```json
+{
+  "rationale": "I am organizing your Lokad credentials into the Work folder.",
+  "operations": [
+    {
+      "action": "move_item",
+      "target_id": "uuid-item-1",
+      "folder_id": "uuid-folder-1"
+    }
+  ]
+}
+```
+
+*   **Output (AI receives):** A success string or a fast-failing `ValidationError` string if the AI tries to manipulate forbidden keys.
+
+**Example Expected Output:**
+```text
+Transaction completed successfully.
+- Moved item uuid-item-1 to folder uuid-folder-1
+```
+
+**Example Failure Output (If AI attempts a hack):**
+```text
+ValidationError: 1 validation error for TransactionPayload... Extra inputs are not permitted (type=extra_forbidden)
+```
+
 ---
 
 ## 🛠️ Exhaustive API Coverage (17 Enum Actions)
