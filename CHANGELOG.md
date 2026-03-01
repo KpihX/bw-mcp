@@ -2,7 +2,7 @@
 
 All notable changes to this project, from its inception to the current secure state.
 
-## [v1.3.0] - 2026-03-01: The Daemon Evolution & Batch Upgrade
+## [v1.3.1] - 2026-03-01: The Daemon Evolution & Batch Upgrade
 ### ⚙️ Daemon Lifecycle Control
 - **Typer CLI Overhaul**: Refactored the core `bw-mcp` entry point (`__init__.py` -> `main.py`) from a bare `main()` into a fully-fledged Typer CLI with systemd-like daemon controls.
 - **PID File Management**: Created `daemon.py` to manage a stateful `~/.bw_mcp/bw-mcp.pid` tracking the live FastMCP stdio process.

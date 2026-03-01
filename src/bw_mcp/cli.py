@@ -22,7 +22,7 @@ console = Console()
 
 @log_app.command("view")
 def log_view(
-    l: int = typer.Option(None, "-l", help="Number of latest logs to list in a table"),
+    l: int = typer.Option(None, "-l", "--last", help="Number of latest logs to list in a table"),
     n: int = typer.Option(None, "-n", "--number", help="The N-th most recent log to view in full JSON (1=newest)")
 ):
     """View transaction logs. Use -l to list a table of logs, or -n to view a specific log in full JSON."""

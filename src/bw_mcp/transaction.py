@@ -270,8 +270,9 @@ class TransactionManager:
                                     f"Original error from CLI: {_safe_error_message(e)}")
 
         for op in operations:
-            is_item_action = any(op.action == a for a in ItemAction) or any(op.action == a for a in EditAction)
-            is_folder_action = any(op.action == a for a in FolderAction)
+            # Proper Enum member checking
+            is_item_action = isinstance(op.action, (ItemAction, EditAction))
+            is_folder_action = isinstance(op.action, FolderAction)
             
             # 1. Validate target_id (the main entity being manipulated)
             if getattr(op, "target_id", None):

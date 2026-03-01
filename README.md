@@ -795,7 +795,7 @@ If you use the `gemini-cli`, you can integrate `bw-mcp` natively to give your ag
 ```json
 {
   "name": "bw-mcp",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "Sovereign IA-Blind Proxy for Bitwarden",
   "mcpServers": {
     "bw-mcp": {
@@ -825,7 +825,7 @@ gemini extensions install .
 ```json
 {
   "name": "bw-mcp",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "Sovereign IA-Blind Proxy for Bitwarden",
   "mcpServers": {
     "bw-mcp": {
