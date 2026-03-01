@@ -11,8 +11,8 @@ import bw_blind_proxy.server as server
 @patch('bw_blind_proxy.server.SecureSubprocessWrapper.execute_json')
 def test_get_vault_map_split_search(mock_exec_json, mock_unlock, mock_ask):
     """Ensure search_items and search_folders route correctly to their respective base args."""
-    mock_ask.return_value = "pw"
-    mock_unlock.return_value = "session"
+    mock_ask.return_value = bytearray("pw", "utf-8")
+    mock_unlock.return_value = bytearray("session", "utf-8")
     mock_exec_json.return_value = []
     
     server.get_vault_map(search_items="Lokad", search_folders="Dev")
@@ -31,8 +31,8 @@ def test_get_vault_map_split_search(mock_exec_json, mock_unlock, mock_ask):
 @patch('bw_blind_proxy.server.SecureSubprocessWrapper.execute_json')
 def test_get_vault_map_trash_state_none(mock_exec_json, mock_unlock, mock_ask):
     """Ensure trash_state='none' skips fetching the trash."""
-    mock_ask.return_value = "pw"
-    mock_unlock.return_value = "session"
+    mock_ask.return_value = bytearray("pw", "utf-8")
+    mock_unlock.return_value = bytearray("session", "utf-8")
     mock_exec_json.return_value = []
     
     server.get_vault_map(trash_state="none")
@@ -50,8 +50,8 @@ def test_get_vault_map_trash_state_none(mock_exec_json, mock_unlock, mock_ask):
 @patch('bw_blind_proxy.server.SecureSubprocessWrapper.execute_json')
 def test_get_vault_map_trash_state_only(mock_exec_json, mock_unlock, mock_ask):
     """Ensure trash_state='only' skips fetching active items to speed up the proxy."""
-    mock_ask.return_value = "pw"
-    mock_unlock.return_value = "session"
+    mock_ask.return_value = bytearray("pw", "utf-8")
+    mock_unlock.return_value = bytearray("session", "utf-8")
     mock_exec_json.return_value = []
     
     server.get_vault_map(trash_state="only")
@@ -70,8 +70,8 @@ def test_get_vault_map_trash_state_only(mock_exec_json, mock_unlock, mock_ask):
 @patch('bw_blind_proxy.server.SecureSubprocessWrapper.execute_json')
 def test_get_vault_map_folder_id(mock_exec_json, mock_unlock, mock_ask):
     """Ensure folder_id is added to the args array."""
-    mock_ask.return_value = "pw"
-    mock_unlock.return_value = "session"
+    mock_ask.return_value = bytearray("pw", "utf-8")
+    mock_unlock.return_value = bytearray("session", "utf-8")
     mock_exec_json.return_value = []
     
     server.get_vault_map(folder_id="my-folder")

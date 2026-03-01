@@ -20,17 +20,18 @@ L'agent IA (Claude/Gemini) lit cette phrase. Il réalise qu'il a besoin d'inform
 ```text
  +---------+      (1) Ask       +--------------+
  | server  | -----------------> |  ui (Zenity) |
- |  (MCP)  | <----------------- |              |
- +----+----+      "Password"    +--------------+
+ |  (MCP)  | <----------------- |   text=False  |
+ +----+----+   bytearray(pwd)   +--------------+
       |
-      | (2) unlock_vault("Password")
+      | (2) unlock_vault(master_password: bytearray)
       v
- +----+----+      (3) Convert to bytearray      +-----------+
+ +----+----+      (3) Inject via env dict       +-----------+
  | wrapper | ---------------------------------> |    RAM    |
  | (Python)| <--------------------------------- | [P][a][s] |
  +----+----+                                    +-----+-----+
       |                                               ^
-      | (4) subprocess.run(env={"BW_PASSWORD"})       |
+      | (4) subprocess.run(env={"BW_PASSWORD"})        |
+      |     capture_output=True, text=False            |
       v                                               |
  +----+----+                                          |
  | bw CLI  |       (6) WIPE bytearray to 0x00         |
@@ -44,21 +45,22 @@ L'outil `@mcp.tool() get_vault_map()` est déclenché par le client MCP.
 
 ### 2. L'Alerte GUI dans `ui.py`
 Le code appelle `HITLManager.ask_master_password(title="Proxy Request: Read Vault Map")`.
-* **Fonction exécutée :** `subprocess.run(["zenity", "--password", ...])`
+* **Fonction exécutée :** `subprocess.run(["zenity", "--password", ...], text=False)`
 * **Objectif :** Bloquer l'exécution Python et afficher une fenêtre système native à `kpihx`. L'agent IA est en attente réseau. Il ne peut rien faire.
 * `kpihx` tape son mot de passe : `SuperSecret123`.
-* Zenity renvoie le mot de passe via `stdout`, capturé par `result.stdout.strip()`.
+* **Capture en octets bruts :** Le paramètre `text=False` force Python à retourner `result.stdout` comme un objet `bytes` immutable (pas `str`). On le convertit immédiatement en `bytearray` mutable. À aucun moment le mot de passe n'existe comme `str` en RAM — **c'est la règle d'or de la sécurité mémoire**.
+* Les caractères de fin de ligne (`\n`, `\r`) sont retirés avec `bytearray.pop()`.
 
 ### 3. Le Déverrouillage Isolant dans `subprocess_wrapper.py`
-Le mot de passe retourne dans `server.py`, qui l'envoie immédiatement à `SecureSubprocessWrapper.unlock_vault("SuperSecret123")`.
+Le `bytearray` du mot de passe retourne dans `server.py`, qui l'envoie immédiatement à `SecureSubprocessWrapper.unlock_vault(master_password: bytearray)`.
 * **Problème de l'OS :** Passer "SuperSecret123" en argument de commande Bash expose la chaîne à `ps aux`.
 * **L'Astuce :** 
   1. On copie l'environnement Linux actuel : `env = os.environ.copy()`.
-  2. On convertit le mot de passe en tableau d'octets mutables : `pw_bytes = bytearray("SuperSecret123", 'utf-8')`.
-  3. On injecte ce mot de passe dans l'environnement Python cloné sous le nom `"BW_PASSWORD"`.
-  4. On lance `subprocess.run(["bw", "unlock", "--passwordenv", "BW_PASSWORD", "--raw"], env=env)`. La CLI Bitwarden se sert dans l'environnement virtuel du processus Python enfant.
-* **Le Résultat :** La CLI crache la clé de session éphémère (ex: `12345SESSIONKEY67890`) via `stdout`.
-* **Le Nettoyage (The Scrubbing) :** Le bloc `finally` s'exécute. `env["BW_PASSWORD"]` est écrasé par `"DEADBEEF...DEADBEEF"`. La boucle Python écrase manuellement chaque case du `pw_bytes` avec des `0`. Le Garbage Collector Python n'a plus rien de compromettant à nettoyer. La mémoire est saine.
+  2. On décode le `bytearray` en `str` **uniquement** pour l'injection dans le dictionnaire d'environnement (Python impose `str` pour les valeurs d'env). Cette string éphémère est référencée **une seule microseconde**.
+  3. On injecte ce mot de passe sous le nom `"BW_PASSWORD"` dans l'env cloné.
+  4. On lance `subprocess.run(["bw", "unlock", "--passwordenv", "BW_PASSWORD", "--raw"], env=env, text=False)`. La CLI Bitwarden se sert dans l'environnement du processus enfant. Le `text=False` capture la session key comme `bytes` bruts.
+* **Le Résultat :** La CLI crache la clé de session éphémère via `stdout`, capturée comme `bytes` puis convertie en `bytearray`.
+* **Le Nettoyage (The Scrubbing) :** Le bloc `finally` s'exécute. `env["BW_PASSWORD"]` est écrasé par `"DEADBEEF...DEADBEEF"` puis supprimé (`del`). La mémoire est assainie.
 
 ### 4. L'Interrogation de la CLI
 Nous avons la session. Mais on ne donne pas tout de suite le JSON à l'IA. `server.py` appelle `SecureSubprocessWrapper.execute_json(["list", "folders"], session_key)`.
@@ -131,13 +133,18 @@ Elle boucle sur les opérations : `_execute_single_action(op, session_key)`.
 ### 4. Le Grand Écrasement (Destruction de Preuves)
 Les opérations s'achèvent. Le bloc `finally` dans `execute_batch` du `transaction.py` s'abat pour conclure le processus.
 ```python
-sk_bytes = bytearray(session_key, 'utf-8')
-for i in range(len(sk_bytes)):
-    sk_bytes[i] = 0
-del sk_bytes
+# session_key et master_password sont des bytearray natifs
+# Pas besoin de conversion : on écrase directement chaque octet.
+for i in range(len(session_key)):
+    session_key[i] = 0
 del session_key
+for i in range(len(master_password)):
+    master_password[i] = 0
+del master_password
 ```
-Encore une fois, la RAM de l'ordinateur de `kpihx` est assainie manuellement. Le bloc de mémoire où s'était logée la `BW_SESSION` ne contient désormais qu'une suite de `0x00` (des zéros binaires), rendant la rétro-ingénierie par dump mémoire post-mortem totalement inutile.
+La RAM de l'ordinateur de `kpihx` est assainie manuellement. Le bloc de mémoire où s'était logée la `BW_SESSION` ne contient désormais qu'une suite de `0x00` (des zéros binaires), rendant la rétro-ingénierie par dump mémoire post-mortem totalement inutile.
+
+**Pourquoi `bytearray` et pas `str` ?** Les objets `str` de Python sont **immutables** : toute manipulation (`.strip()`, concaténation, stockage dans un dict) crée une **nouvelle** copie en mémoire. L'ancienne copie reste dans le heap jusqu'au ramassage du Garbage Collector — ce qui peut prendre des secondes, voire des minutes. Pendant ce temps, un dump mémoire (`/proc/<pid>/mem`) expose le secret en clair. Les `bytearray`, eux, sont **mutables** : on peut écraser chaque octet directement (`key[i] = 0`) sans créer de copie. C'est la seule stratégie de nettoyage mémoire fiable en Python pur.
 
 ### 5. La Fin du Scénario
 `transaction.py` retourne à `server.py` la phrase : *"Transaction completed successfully."*

@@ -10,8 +10,8 @@ Assistant sends a `propose_vault_transaction` with 10 operations.
 
 ## 🛡️ T+2s: WAL Initialization
 - **Consistency (C):** Pydantic validates the 10 ops against strict Enums. `extra="forbid"` ensures no secret field was sneaked in.
-- **Durability (D):** The proxy writes an empty WAL immediately: `write_wal(tx_id, [])`.
-- After each successful op, a rollback command is appended: `write_wal(tx_id, [rb_1])`, then `write_wal(tx_id, [rb_1, rb_2])`...
+- **Durability (D):** The proxy writes an empty WAL immediately: `write_wal(tx_id, [], master_password)`. The WAL is **AES-encrypted at rest** using a Fernet key derived from the Master Password via PBKDF2 (480k iterations) with a fresh 16-byte random salt.
+- After each successful op, a rollback command is appended and the WAL is **re-encrypted** with a new salt: `write_wal(tx_id, [rb_1], master_password)`.
 - **This is the point of no return for safety.**
 
 ## ⚠️ T+5s: The Incident (Power Failure / `kill -9`)
@@ -29,29 +29,30 @@ Assistant sends a `propose_vault_transaction` with 10 operations.
 The user restarts their machine. They ask: "Hey, show me my vault."
 
 1. **The Sentinel:** Assistant calls `get_vault_map`.
-2. **The Discovery:** `check_recovery()` detects the orphaned `pending_transaction.json` (9 commands inside).
-3. **The Shared Engine:** `_perform_rollback(tx_id, [rb_1...rb_9], session)` is called.
+2. **The Discovery:** `check_recovery()` detects the orphaned encrypted `pending_transaction.wal` file.
+3. **The Decryption:** The proxy re-prompts for the Master Password, derives the Fernet key via PBKDF2, and decrypts the WAL to recover the 9 rollback commands.
+4. **The Shared Engine:** `_perform_rollback(tx_id, [rb_1...rb_9], master_password, session_key)` is called.
 
 ```text
 LIFO Rollback with Idempotent WAL Consumption:
 
 WAL before: [rb_1, rb_2, ..., rb_9]  (rb_9 = LIFO head)
 
-rb_9 executed ✅ → pop_rollback_command(tx_id) → WAL: [rb_1, ..., rb_8]
-rb_8 executed ✅ → pop_rollback_command(tx_id) → WAL: [rb_1, ..., rb_7]
+rb_9 executed ✅ → pop_rollback_command(tx_id, master_pw) → re-encrypt WAL: [rb_1, ..., rb_8]
+rb_8 executed ✅ → pop_rollback_command(tx_id, master_pw) → re-encrypt WAL: [rb_1, ..., rb_7]
 ...
 ⚡ CRASH again? No problem.
-At next boot, WAL only contains REMAINING commands.
+At next boot, encrypted WAL only contains REMAINING commands.
 Already-reversed ops are NEVER double-applied.
 ...
-rb_1 executed ✅ → pop_rollback_command(tx_id) → WAL: []
-clear_wal() → done.
+rb_1 executed ✅ → pop_rollback_command(tx_id, master_pw) → re-encrypt WAL: []
+clear_wal() → encrypted .wal file deleted.
 ```
 
 4. **Recovery Message to the LLM:**
 `"WARNING: A previous critical crash was detected (TX: <uuid>). The proxy executed a full WAL rollback (9 command(s)) and restored vault integrity. You may now proceed safely."`
 
-5. **The Log Created (JSON):**
+5. **The Log Created (JSON, scrubbed by `deep_scrub_payload`):**
 ```json
 {
   "transaction_id": "the-crashed-tx-uuid",
@@ -59,10 +60,10 @@ clear_wal() → done.
   "rationale": "Hard-crash detected upon startup. System auto-recovered via WAL.",
   "operations_requested": [],
   "rollback_trace": [
-    "bw restore item legacy-id-9",
-    "bw restore item legacy-id-8",
+    "restore item legacy-id-9",
+    "restore item legacy-id-8",
     "...",
-    "bw move item-1 original-folder-id"
+    "edit item item-1 [PAYLOAD]"
   ]
 }
 ```
@@ -90,7 +91,8 @@ This scenario was only possible because of the `MAX_BATCH_SIZE` configuration. W
 - **Atomicity (A):** Despite the crash, the final state is "Nothing was changed". The saga rollback guarantees it.
 - **Consistency (C):** All Pydantic validations passed before a single byte reached the network.
 - **Isolation (I):** `check_recovery()` blocks all new operations until the vault is confirmed clean.
-- **Durability (D):** The WAL survived the power cut. It was consumed incrementally using `pop_rollback_command`, making the recovery crash-proof itself.
-- **Transparency:** A `CRASH_RECOVERED_ON_BOOT` JSON log is written as forensic proof. Inspect with `bw-proxy log --last 1`.
+- **Durability (D):** The encrypted WAL survived the power cut. It was consumed incrementally using `pop_rollback_command` (which re-encrypts the WAL after each pop), making the recovery crash-proof itself.
+- **Confidentiality:** The WAL file is AES-encrypted (Fernet + PBKDF2) and `chmod 600`. Even if exfiltrated, it's useless without the Master Password.
+- **Transparency:** A `CRASH_RECOVERED_ON_BOOT` JSON log is written as forensic proof (scrubbed by `deep_scrub_payload`). Inspect with `bw-proxy log --last 1`.
 
-**Outcome:** Your data survived a hardware failure — and would survive a sequence of hardware failures — thanks to the idempotent WAL Engine.
+**Outcome:** Your data survived a hardware failure — and would survive a sequence of hardware failures — thanks to the encrypted, idempotent WAL Engine.

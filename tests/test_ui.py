@@ -6,33 +6,33 @@ from bw_blind_proxy.models import (
     RestoreItemAction,
     UpsertCustomFieldAction,
     DeleteFolderAction,
-    RestoreFolderAction,
     EditItemLoginAction
 )
 
 def test_ui_format_operations():
-    """Verify that every polymophic action renders beautifully without crashing."""
+    """Verify that every polymorphic action renders beautifully without crashing."""
     op_rename = RenameItemAction(target_id="1", new_name="A")
     op_restore = RestoreItemAction(target_id="2")
     op_field = UpsertCustomFieldAction(target_id="3", name="API Key", value="sk_123", type=0)
     op_del = DeleteFolderAction(target_id="4")
     op_login = EditItemLoginAction(target_id="5", username="user@foo.com")
-    op_res_folder = RestoreFolderAction(target_id="6")
     
-    assert "✏️ RENAME ITEM (1) -> 'A'" in HITLManager._format_operation(op_rename)
-    assert "♻️ RESTORE ITEM (2) -> From Trash" in HITLManager._format_operation(op_restore)
-    assert "🏷️ UPSERT FIELD (3) -> [Text] 'API Key' = 'sk_123'" in HITLManager._format_operation(op_field)
-    assert "💥 DELETE FOLDER (4)" in HITLManager._format_operation(op_del)
-    assert "🔧 EDIT LOGIN (5) -> Username='user@foo.com'" in HITLManager._format_operation(op_login)
-    assert "♻️ RESTORE FOLDER (6) -> From Trash" in HITLManager._format_operation(op_res_folder)
+    id_map = {"1": "Item A", "4": "Bad Folder"}
+    
+    assert "✏️ RENAME ITEM 'Item A' -> 'A'" in HITLManager._format_operation(op_rename, id_map)
+    assert "♻️ RESTORE ITEM (2) -> From Trash" in HITLManager._format_operation(op_restore, id_map)
+    assert "🏷️ UPSERT FIELD (3) -> [Text] 'API Key' = 'sk_123'" in HITLManager._format_operation(op_field, id_map)
+    assert "💥 DELETE FOLDER 'Bad Folder'" in HITLManager._format_operation(op_del, id_map)
+    assert "🔧 EDIT LOGIN (5) -> Username='user@foo.com'" in HITLManager._format_operation(op_login, id_map)
 
 from unittest.mock import patch, MagicMock
 
 def test_ui_contains_destructive_alert():
     """Ensure the RED ALERT logic triggers properly on delete actions."""
+    # delete_folder must be standalone — use a single-op batch
     payload = TransactionPayload(
-        rationale="Doing some sweeping",
-        operations=[RenameItemAction(target_id="1", new_name="Safe"), DeleteFolderAction(target_id="2")]
+        rationale="Deleting a folder",
+        operations=[DeleteFolderAction(target_id="2")]
     )
     
     with patch('bw_blind_proxy.ui.subprocess.run') as mock_run:

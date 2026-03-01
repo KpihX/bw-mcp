@@ -4,6 +4,7 @@ import datetime
 from typing import List, Dict, Any
 from .models import TransactionPayload, TransactionStatus
 from .config import STATE_DIR
+from .scrubber import deep_scrub_payload
 
 LOG_DIR = os.path.join(STATE_DIR, "logs")
 
@@ -53,9 +54,9 @@ class TransactionLogger:
             "status": status,
             "rationale": payload.rationale,
             "error_message": error_message,
-            "operations_requested": payload.model_dump().get("operations", []),
+            "operations_requested": deep_scrub_payload(payload.model_dump().get("operations", [])),
             "execution_trace": [msg.lstrip('-> ').strip() for msg in (executed_ops or [])],
-            "failed_execution": failed_op,
+            "failed_execution": deep_scrub_payload(failed_op),
             "rollback_trace": executed_rolled_back_cmds or [],
             "failed_rollback": failed_rollback_cmd
         }

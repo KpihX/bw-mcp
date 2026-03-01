@@ -50,3 +50,27 @@ STATE_DIR = os.path.expanduser(proxy_config.get("state_directory", default_state
 
 # Maximum operations per batch — configurable to minimize the race-condition window
 MAX_BATCH_SIZE: int = proxy_config.get("max_batch_size", 10)
+
+# -----------------
+# SECURITY CONSTANTS
+# -----------------
+_security_config = _config_cache.get("security", {})
+
+# Placeholder used in structured error logs to replace opaque/secret CLI args.
+# Example: "bw edit item <uuid> [PAYLOAD] failed." instead of leaking base64/JSON.
+PAYLOAD_TAG: str = _security_config.get("payload_tag", "[PAYLOAD]")
+
+# Bitwarden environment variable names for credential injection into subprocesses.
+# Defined here to avoid magic strings scattered across the codebase.
+BW_PASSWORD_ENV: str = _security_config.get("bw_password_env", "BW_PASSWORD")
+BW_SESSION_ENV: str = _security_config.get("bw_session_env", "BW_SESSION")
+
+# -----------------
+# CRYPTO CONSTANTS
+# -----------------
+_wal_crypto_config = _config_cache.get("wal_crypto", {})
+
+# Cryptographic parameters for the Write-Ahead Log
+WAL_SALT_LENGTH: int = _wal_crypto_config.get("salt_length", 16)
+WAL_KEY_LENGTH: int = _wal_crypto_config.get("key_length", 32)
+WAL_PBKDF2_ITERATIONS: int = _wal_crypto_config.get("iterations", 480_000)

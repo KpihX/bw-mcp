@@ -1,5 +1,5 @@
 import subprocess
-from typing import List, Any
+from typing import List, Any, Dict
 from .models import TransactionPayload
 
 class HITLManager:
@@ -10,89 +10,102 @@ class HITLManager:
     """
     
     @staticmethod
-    def ask_master_password(title: str = "BW-Blind-Proxy: Unlock Vault") -> str:
+    def ask_master_password(title: str = "BW-Blind-Proxy: Unlock Vault") -> bytearray:
         """
         Triggers a secure Zenity popup to ask for the master password.
+        Returns a mutable bytearray to allow manual memory wiping by the caller.
         """
         try:
+            # text=False prevents Python from caching an immutable string in RAM
             result = subprocess.run(
                 ["zenity", "--password", f"--title={title}"],
                 capture_output=True,
-                text=True
+                text=False
             )
             if result.returncode != 0:
                 raise ValueError("Password prompt cancelled by user.")
-            return result.stdout.strip()
+                
+            # Convert raw bytes directly to mutable bytearray and strip trailing newlines
+            pw_bytes = bytearray(result.stdout)
+            while pw_bytes and pw_bytes[-1] in (b'\n'[0], b'\r'[0]):
+                pw_bytes.pop()
+                
+            return pw_bytes
             
         except FileNotFoundError:
             raise RuntimeError("Zenity is not installed. Please install it with: sudo apt install zenity")
 
     @staticmethod
-    def _format_operation(op: Any) -> str:
+    def _format_operation(op: Any, id_to_name: Dict[str, str] = None) -> str:
         """Helper to format a specific polymorphic operation for human readability."""
         from .models import ItemAction, FolderAction, EditAction
         
+        def resolve(uuid: str, prefix: str = "") -> str:
+            if not uuid: return "ROOT"
+            name = (id_to_name or {}).get(uuid)
+            if name: return f"'{name}'"
+            return f"{prefix}({uuid})"
+
         # --- ITEM ACTIONS ---
         if op.action == ItemAction.CREATE:
             t_str = {1: "Login", 2: "SecureNote", 3: "Card", 4: "Identity"}.get(op.type, "Unknown")
-            return f"🌟 CREATE ITEM ({t_str}) -> '{op.name}'"
+            # If creating a new item, op.name is available directly
+            return f"🌟 CREATE ITEM ({t_str}) -> '{op.name}'" + (f" in folder {resolve(op.folder_id, 'folder ')}" if op.folder_id else "")
         elif op.action == ItemAction.RENAME:
-            return f"✏️ RENAME ITEM ({op.target_id}) -> '{op.new_name}'"
+            return f"✏️ RENAME ITEM {resolve(op.target_id)} -> '{op.new_name}'"
         elif op.action == ItemAction.MOVE_TO_FOLDER:
-            return f"📂 MOVE ITEM ({op.target_id}) -> to folder '{op.folder_id or 'ROOT'}'"
+            return f"📂 MOVE ITEM {resolve(op.target_id)} -> to folder {resolve(op.folder_id)}"
         elif op.action == ItemAction.DELETE:
-            return f"💥 DELETE ITEM ({op.target_id})"
+            return f"💥 DELETE ITEM {resolve(op.target_id)}"
         elif op.action == ItemAction.RESTORE:
-            return f"♻️ RESTORE ITEM ({op.target_id}) -> From Trash"
+            return f"♻️ RESTORE ITEM {resolve(op.target_id)} -> From Trash"
         elif op.action == ItemAction.FAVORITE:
             state = "⭐ FAVORITE" if op.favorite else "❌ UNFAVORITE"
-            return f"{state} ITEM ({op.target_id})"
+            return f"{state} ITEM {resolve(op.target_id)}"
         elif op.action == ItemAction.MOVE_TO_COLLECTION:
-            return f"🏢 MOVE TO ORG ({op.target_id}) -> Organization '{op.organization_id}'"
+            return f"🏢 MOVE TO ORG {resolve(op.target_id)} -> Organization {resolve(op.organization_id)}"
         elif op.action == ItemAction.TOGGLE_REPROMPT:
             state = "🔒 ENABLED" if op.reprompt else "🔓 DISABLED"
-            return f"🛡️ REPROMPT ({op.target_id}) -> {state}"
+            return f"🛡️ REPROMPT {resolve(op.target_id)} -> {state}"
         elif op.action == ItemAction.DELETE_ATTACHMENT:
-            return f"💥 DELETE ATTACHMENT ({op.attachment_id}) -> from Item '{op.target_id}'"
+            return f"💥 DELETE ATTACHMENT ({op.attachment_id}) -> from Item {resolve(op.target_id)}"
             
         # --- FOLDER ACTIONS ---
         elif op.action == FolderAction.CREATE:
             return f"📁 CREATE FOLDER -> '{op.name}'"
         elif op.action == FolderAction.RENAME:
-            return f"✏️ RENAME FOLDER ({op.target_id}) -> '{op.new_name}'"
+            return f"✏️ RENAME FOLDER {resolve(op.target_id)} -> '{op.new_name}'"
         elif op.action == FolderAction.DELETE:
-            return f"💥 DELETE FOLDER ({op.target_id})"
-        elif op.action == FolderAction.RESTORE:
-            return f"♻️ RESTORE FOLDER ({op.target_id}) -> From Trash"
+            return f"💥 DELETE FOLDER {resolve(op.target_id)}"
             
         # --- EDIT ACTIONS ---
         elif op.action == EditAction.LOGIN:
             changes = []
             if op.username: changes.append(f"Username='{op.username}'")
             if op.uris: changes.append(f"URIs={len(op.uris)} values")
-            return f"🔧 EDIT LOGIN ({op.target_id}) -> {', '.join(changes)}"
+            return f"🔧 EDIT LOGIN {resolve(op.target_id)} -> {', '.join(changes)}"
         elif op.action == EditAction.CARD:
             changes = []
             if op.cardholderName: changes.append("Name")
             if op.brand: changes.append("Brand")
             if op.expMonth or op.expYear: changes.append("Expiry")
-            return f"💳 EDIT CARD ({op.target_id}) -> {', '.join(changes)}"
+            return f"💳 EDIT CARD {resolve(op.target_id)} -> {', '.join(changes)}"
         elif op.action == EditAction.IDENTITY:
-            return f"🪪 EDIT IDENTITY ({op.target_id}) -> Updated contact fields"
+            return f"🪪 EDIT IDENTITY {resolve(op.target_id)} -> Updated contact fields"
         elif op.action == EditAction.CUSTOM_FIELD:
             t_str = "Text" if op.type == 0 else "Boolean"
-            return f"🏷️ UPSERT FIELD ({op.target_id}) -> [{t_str}] '{op.name}' = '{op.value}'"
+            return f"🏷️ UPSERT FIELD {resolve(op.target_id)} -> [{t_str}] '{op.name}' = '{op.value}'"
             
         return f"❓ UNKNOWN ACTION: {op.action}"
 
     @staticmethod
-    def review_transaction(payload: TransactionPayload) -> bool:
+    def review_transaction(payload: TransactionPayload, id_to_name: dict = None) -> bool:
         """
         Displays a Zenity dialog with the list of operations proposed by the agent.
         If any operation is destructive (delete), it uses a Warning dialog.
         """
         formatted_ops = "\n".join(
-            f"{i}. {HITLManager._format_operation(op)}" 
+            f"{i}. {HITLManager._format_operation(op, id_to_name)}" 
             for i, op in enumerate(payload.operations, 1)
         )
         

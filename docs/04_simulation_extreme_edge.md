@@ -67,7 +67,9 @@ Cependant, pour permettre à l'IA d'interagir avec les éléments en périphéri
 
 ## 🎬 PHASE 1 : La Forge du Payload (Enums)
 
-L'agent IA utilise les 15 actions strictes dérivées de `ItemAction` pour forger son JSON.
+L'agent IA utilise les 16 actions strictes dérivées de `ItemAction` pour forger son JSON.
+
+> **Note :** `restore_folder` a été retiré de l'API. Les dossiers Bitwarden sont soumis à un **hard-delete** (pas de corbeille), donc cette commande n'existe pas dans la CLI. La restauration de dossier est donc architecturalement non-supportée.
 
 ```json
 {

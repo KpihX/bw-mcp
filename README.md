@@ -73,7 +73,9 @@ If you want to understand the codebase, read the documentation in this specific 
 5. **[The Destructive Firewall](docs/05_simulation_destructive_firewall.md)**: How Zenity prevents AI hallucinations from deleting your life.
 6. **[Safe Creation](docs/06_simulation_safe_creation.md)**: How the AI spawns empty shell items without polluting secrets.
 7. **[Advanced Search Filtering](docs/07_simulation_advanced_search.md)**: How the AI optimizes context tokens using the precise backend queries.
-8. **[ACID Resilience & WAL](docs/08_simulation_acid_wal_resilience.md)**: How the Proxy auto-recovers from an OS-level blackout without dataloss.
+8. **[ACID Resilience & Encrypted WAL](docs/08_simulation_acid_wal_resilience.md)**: How the Proxy auto-recovers from an OS-level blackout using encrypted WAL (Fernet + PBKDF2).
+9. **[Security Audit Report](docs/AUDIT.md)**: The full 4-pass security audit — 6 defense layers, exposure matrix, crypto review.
+10. **[Known Limitations](docs/LIMITATIONS.md)**: Architectural constraints imposed by external APIs and their mitigations.
 
 ```text
    [ USER PROMPT ]  : "IpihX, rename my GitHub account and move it to Dev."
@@ -149,8 +151,11 @@ Here is exactly how an AI interacts with your vault.
    - **Deep Dive:** Read **[03_simulation_pii_redaction.md](docs/03_simulation_pii_redaction.md)** for more.
 2. **Strict Polymorphic Pydantic Schemas:** The AI **CANNOT** execute wild bash commands. It can only propose from a hardcoded list of 17 `Enum` atomic actions. If a rogue AI tries to slip `"password": "hacked"` into a `create_item` payload, Pydantic's `extra="forbid"` rule immediately detonates the payload and aborts the transaction.
    - **Deep Dive:** Read **[06_simulation_safe_creation.md](docs/06_simulation_safe_creation.md)**.
-3. **Hardware-Level Memory Wiping:** The `BW_SESSION` key and your Master Password are fundamentally obliterated from Python memory immediately after usage. Instead of relying on Python's Garbage Collector (which leaves strings floating in RAM for hackers to dump), the proxy converts keys to raw `bytearray` matrices and systematically overwrites them with zeroes (`0x00`).
-   - **Deep Dive:** Read **[01_simulation_core_protocol.md](docs/01_simulation_core_protocol.md)**.
+3. **Zero-Memory-Leak Password Strategy:** Your Master Password and `BW_SESSION` key are **never** stored as Python `str` objects (which are immutable and linger in RAM until the Garbage Collector reclaims them). Instead, the proxy:
+   - Captures Zenity `stdout` as raw `bytes` (`text=False` in `subprocess.run`).
+   - Immediately converts to a mutable `bytearray`.
+   - After use, **overwrites every byte with `0x00`** via explicit loop (`for i in range(len(key)): key[i] = 0`).
+   - This eliminates the main attack vector of memory dump forensics. **Deep Dive:** Read **[01_simulation_core_protocol.md](docs/01_simulation_core_protocol.md)**.
 4. **Red Alerts on Destructive Actions:** Modifying an item logs a blue UI prompt. Deleting an item/folder triggers a native Red Warning Zenity Box to guarantee a human doesn't sleepwalk into approving an AI's destructive hallucination.
    - **Deep Dive:** Read **[05_simulation_destructive_firewall.md](docs/05_simulation_destructive_firewall.md)**.
 
@@ -190,7 +195,7 @@ Op 3 fails (bad UUID). The proxy detects it, runs `_perform_rollback` in LIFO or
   "transaction_id": "b5a24dc6-b6c1-4ad4-9096-23d9100b2a9d",
   "timestamp": "2026-02-28T14:12:05.872506",
   "status": "ROLLBACK_SUCCESS",
-  "error_message": "ExecutionError: bw: Item 'BAD_UUID' not found",
+  "error_message": "SecureBWError: An internal error occurred. Check server logs for details.",
   "rationale": "Renaming 2 items and moving a third to a folder.",
   "operations_requested": [
     {"action": "rename_item", "target_id": "uuid-github-001", "new_name": "GitHub"},
@@ -203,13 +208,13 @@ Op 3 fails (bad UUID). The proxy detects it, runs `_perform_rollback` in LIFO or
   ],
   "failed_execution": {"action": "move_item", "target_id": "BAD_UUID"},
   "rollback_trace": [
-    "bw edit item uuid-netflix-007 {\"name\": \"Netflix\", ...}",
-    "bw edit item uuid-github-001 {\"name\": \"Github\", ...}"
+    "edit item uuid-netflix-007 [PAYLOAD]",
+    "edit item uuid-github-001 [PAYLOAD]"
   ]
 }
 ```
 
-**Observation:** The LIFO order is respected — Op 2 is undone before Op 1. The WAL file is consumed (`pop_rollback_command`) as each rollback runs, guaranteeing idempotency even if the proxy crashes *mid-rollback*.
+**Observation:** The LIFO order is respected — Op 2 is undone before Op 1. The WAL file is consumed (`pop_rollback_command`) as each rollback runs, guaranteeing idempotency even if the proxy crashes *mid-rollback*. Note that `rollback_trace` entries are **sanitized** by `_sanitize_args_for_log` — base64 payloads and raw JSON are replaced with `[PAYLOAD]` tags. The `error_message` is filtered through `_safe_error_message` to prevent exception internals from leaking to disk.
 
 ---
 
@@ -222,7 +227,7 @@ The worst case. Op 1 succeeded, Op 2 crashed, AND the rollback for Op 1 also fai
   "transaction_id": "a9f2c1d8-0001-dead-beef-ff0000000000",
   "timestamp": "2026-02-28T14:13:00.000000",
   "status": "ROLLBACK_FAILED",
-  "error_message": "ExecutionError: bw: Network error | RollbackError: bw: Session expired",
+  "error_message": "SecureBWError: An internal error occurred. Check server logs for details.",
   "rationale": "Renaming GitHub and moving Netflix in the same batch.",
   "operations_requested": [
     {"action": "rename_item", "target_id": "uuid-github-001", "new_name": "GitHub"},
@@ -233,11 +238,11 @@ The worst case. Op 1 succeeded, Op 2 crashed, AND the rollback for Op 1 also fai
   ],
   "failed_execution": {"action": "move_item", "target_id": "uuid-netflix-007"},
   "rollback_trace": [],
-  "failed_rollback": "bw edit item uuid-github-001 {\"name\": \"Github\", ...}"
+  "failed_rollback": "edit item uuid-github-001 [PAYLOAD]"
 }
 ```
 
-**Action required:** Read the `failed_rollback` field and re-run the command manually (`bw edit item <id> '<original_json>'`). The JSON gives you exactly what to type.
+**Action required:** Read the `failed_rollback` field and inspect the WAL or Bitwarden web vault to identify the original state. Note that `[PAYLOAD]` masks the base64-encoded original item JSON — the proxy never writes raw secrets to log files.
 
 ---
 
@@ -254,8 +259,8 @@ The proxy was killed mid-transaction (power cut, `kill -9`). On the next MCP too
   "operations_requested": [],
   "execution_trace": [],
   "rollback_trace": [
-    "bw edit item uuid-netflix-007 {\"name\": \"Netflix\", ...}",
-    "bw edit item uuid-github-001 {\"name\": \"Github\", ...}"
+    "edit item uuid-netflix-007 [PAYLOAD]",
+    "edit item uuid-github-001 [PAYLOAD]"
   ]
 }
 ```
@@ -264,21 +269,54 @@ The proxy was killed mid-transaction (power cut, `kill -9`). On the next MCP too
 
 ### 📦 The WAL File: Your Last Line of Defense
 
-During every transaction execution, the proxy writes a **Write-Ahead Log** to `~/.bw_blind_proxy/wal/pending_transaction.json` **before** each CLI command is executed. The file is deleted once the batch completes (success or clean rollback). If it exists when the proxy starts, it's a crash signal.
+During every transaction execution, the proxy writes an **AES-encrypted Write-Ahead Log** to `~/.bw_blind_proxy/wal/pending_transaction.wal` **before** each CLI command is executed. The file is deleted once the batch completes (success or clean rollback). If it exists when the proxy starts, it's a crash signal.
 
-**Exact WAL file structure** (`pending_transaction.json`):
+#### 🔐 WAL Encryption Architecture
 
+The WAL file is **never** stored as plaintext on disk. It is encrypted using a layered cryptographic pipeline:
+
+```text
+                    ┌──────────────────────────────────────────────────┐
+                    │           WAL CRYPTO PIPELINE                    │
+                    │                                                  │
+  Master Password   │   ┌───────────┐   ┌─────────┐   ┌───────────┐  │
+  (bytearray) ──────┼──▶│  PBKDF2   │──▶│ 32-byte │──▶│  Fernet   │  │
+                    │   │ HMAC-SHA256│   │   key   │   │ Encrypt   │  │
+  os.urandom(16) ───┼──▶│ 480k iter │   └─────────┘   │ (AES-128  │  │
+  (random salt)     │   └───────────┘                  │  +HMAC)   │  │
+                    │                                  └─────┬─────┘  │
+                    │                                        │        │
+                    │   .wal file on disk = [salt‖ciphertext]│        │
+                    └────────────────────────────────────────┘        │
+```
+
+**Why this stack?**
+
+| Component     | What it is                                                                                                                  | Why we chose it                                                                                                                                                                                                           |
+| :------------ | :-------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Fernet**    | A symmetric encryption scheme from the `cryptography` library implementing AES-128-CBC with HMAC-SHA256 for authentication. | Provides **authenticated encryption** out of the box — a tampered ciphertext is detected and rejected. No need to manually manage IVs or MAC tags.                                                                        |
+| **PBKDF2**    | Password-Based Key Derivation Function v2 (RFC 8018). Repeatedly hashes the input with HMAC-SHA256.                         | Makes brute-force infeasible: 480,000 iterations mean that trying 1 billion passwords would take ~years on consumer hardware. Even if the `.wal` file is stolen, the key cannot be recovered without the Master Password. |
+| **Salt**      | A 16-byte random value generated fresh via `os.urandom()` for **every** WAL write.                                          | Two identical Master Passwords produce different derived keys across different writes. This defeats precomputation attacks (rainbow tables) and ensures each WAL encryption is cryptographically unique.                  |
+| **bytearray** | A mutable byte sequence used instead of Python's immutable `str`.                                                           | Allows **manual memory zeroing** (`key[i] = 0`) after use. Python's GC cannot guarantee when a `str` is freed, but a zeroed `bytearray` contains nothing exploitable.                                                     |
+
+**WAL binary format on disk** (`pending_transaction.wal`):
+```text
+┌──────────────────┬─────────────────────────────────┐
+│  Salt (16 bytes) │  Fernet Ciphertext (variable)   │
+│  os.urandom(16)  │  AES-128-CBC + HMAC-SHA256      │
+└──────────────────┴─────────────────────────────────┘
+                   ▲
+                   │ chmod 600 (owner-only read/write)
+```
+
+**Decrypted logical structure** (only visible in RAM after correct password):
 ```json
 {
   "transaction_id": "b5a24dc6-b6c1-4ad4-9096-23d9100b2a9d",
   "timestamp": 1740744725.872,
   "rollback_commands": [
-    {
-      "cmd": ["bw", "edit", "item", "uuid-netflix-007", "{\"name\": \"Netflix\", \"type\": 1, ...}"]
-    },
-    {
-      "cmd": ["bw", "edit", "item", "uuid-github-001", "{\"name\": \"Github\", \"type\": 1, ...}"]
-    }
+    {"cmd": ["bw", "edit", "item", "uuid-netflix-007", "<base64_encoded_original_item>"]},
+    {"cmd": ["bw", "edit", "item", "uuid-github-001", "<base64_encoded_original_item>"]}
   ]
 }
 ```
@@ -287,30 +325,33 @@ During every transaction execution, the proxy writes a **Write-Ahead Log** to `~
 `rollback_commands[N]` is the compensating action for the `N`-th successful operation, stored in **append-then-reverse** order (`list.extend(reversed(cmds))`). On recovery, the list is traversed bottom-up (LIFO), and **each command is popped from the file after successful execution** to guarantee idempotency (see `pop_rollback_command`).
 
 ```text
-State Machine: WAL lifecycle (v2 — Idempotent Rollback)
+State Machine: WAL lifecycle (v3 — Encrypted + Idempotent Rollback)
 
   [TX STARTS]
        |
        v
-  write_wal(tx_id, [])              ← empty WAL always exists during a TX
+  write_wal(tx_id, [], master_pw)     ← empty WAL, encrypted with fresh salt
        |
        v
   [OP 1 EXECUTES OK]
-  write_wal(tx_id, [rb_1])         ← WAL updated after each success
+  write_wal(tx_id, [rb_1], master_pw) ← WAL re-encrypted after each success
        |
        v
   [OP 2 EXECUTES OK]
-  write_wal(tx_id, [rb_1, rb_2])   ← rb_2 is at the end = LIFO head
+  write_wal(tx_id, [rb_1, rb_2], master_pw)
        |
-  ...crash? → WAL file persists on disk
-       |
-       v
-  [ON NEXT BOOT: check_recovery()]
+  ...crash? → Encrypted .wal file persists on disk
        |
        v
-  _perform_rollback(tx_id, [rb_1, rb_2], session)   ← Shared LIFO engine
-  ┌─ execute rb_2 ✅ → pop_rollback_command(tx_id) → WAL = [rb_1] (flush to disk!)
-  ├─ execute rb_1 ✅ → pop_rollback_command(tx_id) → WAL = []
+  [ON NEXT BOOT: check_recovery(master_pw, session_key)]
+       |
+       v
+  read_wal(master_pw)  ← Decrypt with PBKDF2 + Fernet
+       |
+       v
+  _perform_rollback(tx_id, [rb_1, rb_2], master_pw, session_key)
+  ┌─ execute rb_2 ✅ → pop_rollback_command(tx_id, master_pw) → re-encrypt WAL = [rb_1]
+  ├─ execute rb_1 ✅ → pop_rollback_command(tx_id, master_pw) → re-encrypt WAL = []
   │
   │   ...CRASH DURING ROLLBACK? No problem:
   │   At next boot, WAL shows only the REMAINING commands.
@@ -322,12 +363,12 @@ State Machine: WAL lifecycle (v2 — Idempotent Rollback)
        Human can intervene manually.
        v
   [TX FULLY RECOVERED]
-  clear_wal()                                       ← WAL deleted. Clean slate.
+  clear_wal()                                       ← Encrypted .wal deleted. Clean slate.
 ```
 
 **Shared Engine Architecture:**
 ```text
-_perform_rollback(tx_id, stack, session_key)
+_perform_rollback(tx_id, stack, master_password, session_key)
   ↑                    ↑
   │                    │
 execute_batch       check_recovery
@@ -339,7 +380,7 @@ Both callers receive the same structured result `{success, executed, failed_cmd,
 
 ## 🔌 MCP Tools Reference (Inputs & Outputs)
 
-The Proxy exposes exactly **five** tools to the AI Agent. This limits the attack surface while enabling profound orchestration and self-auditing capabilities.
+The Proxy exposes exactly **five** tools to the AI Agent. This limits the attack surface while enabling profound orchestration and self-auditing capabilities. Global context (Security, Batch Limits, ACID rules) is delivered to the AI via a **Meta-Prompt instruction** upon server initialization, ensuring zero-latency alignment.
 
 ### 1. `get_vault_map(search_items, search_folders, folder_id, collection_id, organization_id, trash_state, include_orgs)`
 **Description:** Fetches the structural map of the Bitwarden vault, filtering out all secrets securely via Pydantic before transmission. Supports native Bitwarden CLI filtering to drastically reduce the context window and speed up searches.
@@ -403,7 +444,7 @@ The Proxy exposes exactly **five** tools to the AI Agent. This limits the attack
 }
 ```
 
-*   **Output (AI receives):** A success string or a fast-failing `ValidationError` string if the AI tries to manipulate forbidden keys.
+*   **Output (AI receives):** A success string or a sanitized error. If the AI tries to manipulate forbidden keys, Pydantic rejects the payload and `_safe_error_message` strips the field values from the error to prevent the AI from seeing what was rejected.
 
 **Example Expected Output:**
 ```text
@@ -413,11 +454,13 @@ Transaction completed successfully.
 
 **Example Failure Output (If AI attempts a hack):**
 ```text
-ValidationError: 1 validation error for TransactionPayload... Extra inputs are not permitted (type=extra_forbidden)
+Error: Invalid transaction payload. ValidationError: An internal error occurred. Check server logs for details.
 ```
+> **Why not show the full ValidationError?** Because Pydantic includes the rejected field **values** in its error message (e.g., `input_value='stolen_secret'`). The `_safe_error_message` function strips this, returning only the exception type name.
 
-### 3. `get_capabilities_overview()`
-**Description:** A pedagogical tool used by the AI to understand its own environment. It returns a structured markdown document explaining the "Blind by Design" philosophy, the ACID transaction engine, the `MAX_BATCH_SIZE` limits, and the Human-In-The-Loop requirements.
+### 3. `sync_vault()`
+**Description:** Forces the Bitwarden CLI to modernize its local encrypted database by communicating with the server.
+*   **Use Case:** Essential after a large import or when the Agent suspects it is working on stale/cached data.
 
 ### 4. `get_proxy_audit_context(limit)`
 **Description:** Allows the AI to check the operational health of the proxy.
@@ -449,29 +492,28 @@ graph TD
 
 ---
 
-## 🛠️ Exhaustive API Coverage (17 Enum Actions)
+## 🛠️ Exhaustive API Coverage (16 Enum Actions)
 
-The proxy maps Bitwarden's complex CLI into 17 robust, completely secure internal Enums.
+The proxy maps Bitwarden's complex CLI into 16 robust, completely secure internal Enums.
 
 ### Item Organization (`ItemAction`)
 1.  **`create_item`**: Spawns an empty shell (Login, Note, Card, Identity) locally. Strictly blocks LLM from creating secrets safely.
 2.  **`rename_item`**: Safely alters the name of a secret.
-2.  **`move_item`**: Reparents an item inside a specific Folder UUID.
-3.  **`favorite_item`**: Toggles the star/favorite status.
-4.  **`delete_item`**: [🚨 RED ALERT] Removes item to the Trash.
-5.  **`restore_item`**: [Phase 4 Edge] Recovers an item from the Trash.
-6.  **`toggle_reprompt`**: [Phase 4 Edge] Enables/Disables Master Password Reprompt requirement for specific high-value items.
-7.  **`move_to_collection`**: [Phase 4 Edge] Enterprise Organization sharing mapping.
-8.  **`delete_attachment`**: [Phase 4 Edge] Forcefully removes physical file attachments.
+3.  **`move_item`**: Reparents an item inside a specific Folder UUID.
+4.  **`favorite_item`**: Toggles the star/favorite status.
+5.  **`delete_item`**: [🚨 RED ALERT] Removes item to the Trash.
+6.  **`restore_item`**: [Phase 4 Edge] Recovers an item from the Trash.
+7.  **`toggle_reprompt`**: [Phase 4 Edge] Enables/Disables Master Password Reprompt requirement for specific high-value items.
+8.  **`move_to_collection`**: [Phase 4 Edge] Enterprise Organization sharing mapping.
+9.  **`delete_attachment`**: [Phase 4 Edge - ISOLATED] Forcefully removes physical file attachments. **UNRECOVERABLE** — must be the only operation in its batch.
 
 ### Folder Operations (`FolderAction`)
-9.  **`create_folder`**: Instantiates a new logical grouping.
-10. **`rename_folder`**: Self-explanatory.
-11. **`delete_folder`**: [🚨 RED ALERT] Deletes the folder (does not delete the items inside, they go to root).
-12. **`restore_folder`**: [Phase 4 Edge] Recovers a folder from the Trash.
+10. **`create_folder`**: Instantiates a new logical grouping.
+11. **`rename_folder`**: Self-explanatory.
+12. **`delete_folder`**: [🚨 RED ALERT - ISOLATED] Hard-deletes a folder. **Bitwarden folders have NO trash** — this is permanent and not reversible by rollback. All items inside lose their `folderId` reference (moved to "No Folder"). **MUST be the only operation in its batch.** `restore_folder` does NOT exist in the Bitwarden CLI and has been removed.
 
 ### Granular PII Editing (`EditAction`)
-To edit an item, the Python Subprocess grabs the full hidden JSON locally, surgicaly injects the AI's safe modification, and pushes it back up.
+To edit an item, the Python Subprocess grabs the full hidden JSON locally, surgically injects the AI's safe modification, and pushes it back up.
 13. **`edit_item_login`**: Safely updates `Username` & `URIs`. (Strictly rejects attempts to edit `password` or `totp`).
 14. **`edit_item_card`**: Safely updates Expiration Dates, Name, & Brand. (Strictly rejects Credit Card Number & CVV edits).
 15. **`edit_item_identity`**: Safely updates Standard Address & Contact Info. (Strictly rejects SSN, Passport, and License edits).
@@ -487,6 +529,10 @@ For organizational perfection, the Proxy handles advanced states without ever to
                                        |
     [ ORG   ] <--- move_to_coll --- [ PROXY ] --- toggle_reprompt  ---> [ RE-AUTH ]
 ```
+
+> **🟡 Point of Vigilance (Theoretical Edge Case): `move_to_collection`**
+> Moving an item to an Enterprise Organization transfers ownership. Reverting this operation (rolling back to a personal vault) depends entirely on Enterprise Policies. If the user lacks Admin privileges and the Org enforces a "Block moving out of organization" policy, the Bitwarden server will reject the rollback command. The proxy gracefully catches this API failure, prevents crash, and alerts the user/agent that rollback permissions were denied.
+
 **Deep Dive:** Explore how these complex subcommands are executed in **[04_simulation_extreme_edge.md](docs/04_simulation_extreme_edge.md)**.
 
 ---
@@ -500,12 +546,22 @@ We implement the four pillars of database reliability to protect your vault:
 *   **A - Atomicity (Atomicité) :** Every batch of operations is "All-or-Nothing". If one rename fails, all preceding creates/deletes in that batch are automatically reversed.
 *   **C - Consistency (Cohérence) :** Data is validated against strict Pydantic models in a **Virtual Vault** (RAM) before hitting the CLI.
 *   **I - Isolation :** Each transaction is processed in its own secure session context.
-*   **D - Durability (Durabilité) :** Once a transaction starts, its intent is written to disk. It survives process death (`kill -9`) and power outages.
+*   **D - Durability (Durabilité) :** Once a transaction starts, its intent is written to **encrypted disk** (Fernet + PBKDF2). It survives process death (`kill -9`) and power outages.
 
 ### 🛡️ WAL: Write-Ahead Logging (D-Durability)
-To guarantee **Durability**, we use a **WAL Engine**. 
-1. **The Log First:** Before `bw` executes any destructive command, the proxy serializes the **Compensating Action** (Rollback).
-2. **Atomic Recovery:** Upon any tool call (like `get_vault_map`), the proxy first checks for a stranded WAL. If found, it forces a vault repair **before** allowing further actions.
+To guarantee **Durability**, we use a **WAL Engine** with **AES encryption at rest**. 
+1. **The Log First:** Before `bw` executes any destructive command, the proxy derives a Fernet key from your Master Password (PBKDF2, 480k iterations) and encrypts the **Compensating Action** (Rollback) to `pending_transaction.wal`.
+2. **Atomic Recovery:** Upon any tool call (like `get_vault_map`), the proxy first checks for a stranded WAL. If found, it re-prompts for the Master Password, decrypts the WAL, and forces a vault repair **before** allowing further actions.
+3. **Defense-in-depth:** The `.wal` file is `chmod 600` (owner-only access). Even if an attacker can read the file, the AES ciphertext is useless without the Master Password.
+
+### 🛡️ Error Message Sanitization
+Every error message returned to the LLM passes through `_safe_error_message()`. Only `SecureBWError` messages (pre-sanitized by structural CLI token whitelisting) are passed through. All other Python exceptions (which may include secret data in their `str()` representation) are replaced with a generic `"TypeName: An internal error occurred."` message.
+
+### 🛡️ Log Scrubbing Engine (`deep_scrub_payload`)
+Before any data is written to the audit logs on disk, the `deep_scrub_payload()` function recursively walks the entire data structure and replaces the values of sensitive keys with `[PAYLOAD]` tags. The key list (`_SECRET_KEYS`) covers: `password`, `totp`, `notes`, `value`, `ssn`, `number`, `code`, `passportNumber`, `licenseNumber`, `key`.
+
+### 🛡️ CLI Token Redaction (`_sanitize_args_for_log`)
+When logging Bitwarden CLI commands (in rollback traces and error messages), a **whitelist-only** strategy is used. Only known-safe tokens (verbs like `edit`, object types like `item`, UUIDs, and CLI flags) survive. Everything else — JSON payloads, base64 blobs, passwords — is replaced with `[PAYLOAD]`.
 
 ---
 
@@ -514,11 +570,28 @@ To guarantee **Durability**, we use a **WAL Engine**.
 Following the developer mandate of **Independent Autonomous Packages**, the configuration is internalized within the package source.
 
 *   **Location:** `src/bw_blind_proxy/config.yaml`
-*   **Customization:** You can modify the `state_directory` to point to any location.
+*   **Customization:** You can modify the `state_directory`, batch size, redaction tags, and cryptographic parameters.
 
 ```yaml
 # src/bw_blind_proxy/config.yaml
-state_directory: "~/.bw_blind_proxy"
+proxy:
+  name: "BW-Blind-Proxy"
+  state_directory: "~/.bw_blind_proxy"
+  max_batch_size: 10
+
+redaction:
+  populated_tag: "[REDACTED_BY_PROXY_POPULATED]"
+  empty_tag: "[REDACTED_BY_PROXY_EMPTY]"
+
+security:
+  payload_tag: "[PAYLOAD]"        # Mask for opaque CLI payloads in logs/errors
+  bw_password_env: "BW_PASSWORD"  # Env var name for Master Password injection
+  bw_session_env: "BW_SESSION"    # Env var name for Session Key injection
+
+wal_crypto:
+  salt_length: 16       # Random salt per WAL write (bytes)
+  key_length: 32         # AES key derived from PBKDF2 (bytes)
+  iterations: 480000     # PBKDF2 iteration count (brute-force resistance)
 ```
 
 ## 📂 Transparency & File Structure
@@ -527,16 +600,16 @@ The proxy maintains a centralized state directory (configurable) for auditing an
 
 ```text
 ~/.bw_blind_proxy/
-├── logs/                  # Immutable Audit Trail (Stripped of secrets) — JSON format
+├── logs/                  # Immutable Audit Trail (Scrubbed of secrets) — JSON format
 │   ├── 2026-02-28_10-00-01_<uuid>_success.json
 │   ├── 2026-02-28_10-15-45_<uuid>_rollback_success.json
 │   └── 2026-02-28_11-00-00_<uuid>_rollback_failed.json
 └── wal/                   # Recovery Engine (Ephemeral — only exists during active TX)
-    └── pending_transaction.json
+    └── pending_transaction.wal   ← AES-encrypted (Fernet + PBKDF2)
 ```
 
 ### 🔍 Inside an Audit Log (`logs/*.json`)
-Every log is a **structured JSON** — fully machine-parseable and secret-free:
+Every log is a **structured JSON** — fully machine-parseable and **secret-free** thanks to `deep_scrub_payload` and `_sanitize_args_for_log`:
 ```json
 {
   "transaction_id": "c070d585-ba21-4b94-b065-4be725a0bb5b",
@@ -553,19 +626,16 @@ Every log is a **structured JSON** — fully machine-parseable and secret-free:
   ]
 }
 ```
+> **Security note:** The `operations_requested` field is scrubbed by `deep_scrub_payload` — any `password`, `value`, `notes`, etc. are replaced with `[PAYLOAD]`. The `rollback_trace` entries use `_sanitize_args_for_log` — base64 blobs become `[PAYLOAD]`.
 
-### 🔍 Inside a WAL Entry (`logs/wal/pending_transaction.json`)
-This file exists **only** during an active transaction to protect your data.
-```json
-{
-  "transaction_id": "tx-8892",
-  "timestamp": 1740733800.0,
-  "rollback_commands": [
-    { "cmd": ["bw", "restore", "item", "id-item-B"] },
-    { "cmd": ["bw", "edit", "item", "id-item-A", "{\"original_data\": \"...\"}"] }
-  ]
-}
+### 🔐 Inside a WAL Entry (`wal/pending_transaction.wal`)
+This file exists **only** during an active transaction. It is **AES-encrypted at rest** — its contents are never visible as plaintext on disk.
+```text
+Binary format: [16-byte salt][Fernet ciphertext (AES-128-CBC + HMAC-SHA256)]
+Permissions:   chmod 600 (owner-only read/write)
+Decryption:    Requires the same Master Password used during the transaction.
 ```
+To inspect a stranded WAL, use the CLI: `uv run bw-proxy wal` (prompts for Master Password, displays scrubbed content).
 
 ---
 
@@ -605,20 +675,73 @@ uv run bw-proxy wal
 uv run bw-proxy purge --keep=10
 ```
 
-## 🔒 Security Posture & ACID Compliance
+### 🔌 Adding to an MCP Client
 
-### Adding to an MCP Client
-Add the following to your Claude/Cursor configurations, or your `gemini-cli` config:
+To integrate this sovereign proxy into your favorite AI agent, use the following configurations. **Note:** Since the proxy manages your real Bitwarden vault, ensuring it runs from the correct directory or with absolute paths is recommended.
+
+#### Claude Desktop (macOS/Linux)
+Add this to your `claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
     "bw-blind-proxy": {
-      "command": "bw-blind-proxy",
-      "args": []
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/absolute/path/to/bw-blind-proxy",
+        "run",
+        "bw-blind-proxy"
+      ]
     }
   }
 }
 ```
+
+#### Cursor / Other IDEs
+Register a new MCP server with:
+- **Type:** `command`
+- **Command:** `uv --directory /absolute/path/to/bw-blind-proxy run bw-blind-proxy`
+
+#### Environment Variables
+The server expects `BW_PASSWORD_ENV` (or similar) to be available if you want to bypass manual prompt during certain non-interactive sessions, but by default, **it will use Zenity to prompt you for the Master Password on your screen.**
+
+---
+
+## 🚨 Troubleshooting (Discovered During Live Simulation)
+
+These issues were discovered during a real-world MCP simulation session and are now handled gracefully by the proxy.
+
+### 1. `get_vault_map` returns almost no items after a server import
+
+**Symptom:** You imported credentials via the Bitwarden/Vaultwarden Web UI, but the proxy only shows a handful of old items.
+
+**Cause:** The Bitwarden CLI operates on a **local encrypted cache**. It does NOT contact the server on every `bw list` command. After a large import on the Web, the CLI's cache is stale.
+
+**Solution:** Use the `sync_vault` MCP tool (or `bw sync` manually) to force the CLI to download the latest vault state from the server. The proxy now exposes this as a dedicated tool.
+
+### 2. Bitwarden Mobile/Desktop shows "Sync Failed" or "An error has occurred"
+
+**Symptom:** After a massive import, client apps (phone, desktop) fail to synchronize.
+
+**Cause:** The local database of rich UI clients can become "confused" after a sudden, large structural change to the vault. This is a known Bitwarden behavior.
+
+**Solution:** **Log out** of the app completely, then **log back in**. This forces the app to rebuild its local database from scratch. On mobile: `Settings > Log Out`. On Desktop: `Account > Log Out`. This does NOT delete your data; it simply rebuilds the local cache.
+
+### 3. `list org-collections` fails (Organizations)
+
+**Symptom:** The proxy logs `Bitwarden command list org-collections failed.`
+
+**Cause:** If your Bitwarden account has no active Organization membership (e.g., personal/free tier), the CLI returns an error instead of an empty list. This is a Bitwarden CLI quirk.
+
+**Solution:** The proxy now handles this **gracefully**. Organization and collection fetching is wrapped in a try-except block. If it fails, the `organizations` and `collections` fields are returned as empty arrays `[]`, and the rest of the vault data is served normally. You can also set `include_orgs=False` to skip this step entirely.
+
+### 4. `BlindFolder` or `BlindItem` crash on `id: null`
+
+**Symptom:** `ValidationError: Input should be a valid string [type=string_type, input_value=None]`
+
+**Cause:** Bitwarden returns a sentinel "No Folder" entry with `"id": null`. The Pydantic models originally required `id: str`.
+
+**Solution:** Fixed. All structural models (`BlindItem`, `BlindFolder`, `BlindOrganization`) now accept `id: Optional[str] = None`.
 
 ---
 
@@ -626,14 +749,16 @@ Add the following to your Claude/Cursor configurations, or your `gemini-cli` con
 To truly trust a sovereign proxy, you must understand how it behaves in extreme edge cases. Read these explicit simulations in the `docs/` folder:
 
 * `docs/bitwarden_architecture.md`: Explains the granular anatomy of the Bitwarden schemas and the reverse-engineering used for the Proxy's defense model.
-* `docs/01_simulation_core_protocol.md`: The base AI negotiation cycle and memory wiping.
+* `docs/01_simulation_core_protocol.md`: The base AI negotiation cycle, `bytearray` memory wiping, and `text=False` capture.
 * `docs/02_simulation_vault_organization.md`: Complex orchestration and batching logic.
 * `docs/03_simulation_pii_redaction.md`: How Pydantic obliterates AI attempts to modify PII and Custom Hidden Fields.
 * `docs/04_simulation_extreme_edge.md`: *(See actual file for Phase 4 Trash/Collection/Reprompt capabilities)*.
 * `docs/05_simulation_destructive_firewall.md`: How the Red Alert systems protect against malicious AI deletions.
 * `docs/06_simulation_safe_creation.md`: How the AI creates safe empty shells without generating passwords.
 * `docs/07_simulation_advanced_search.md`: Precision mapping and search queries to limit LLM context bloat.
-* `docs/08_simulation_acid_wal_resilience.md`: 100% transparency on the crash-recovery and Typer Audit Logging mechanism.
+* `docs/08_simulation_acid_wal_resilience.md`: Encrypted WAL, crash-recovery, PBKDF2/Fernet pipeline, and idempotent rollback.
+* `docs/AUDIT.md`: **Full security audit report** — 6 defense layers, exposure surface matrix, `str(e)` exhaustive classification, cryptographic architecture review, brute-force resistance analysis.
+* `docs/LIMITATIONS.md`: Known architectural limitations and mitigations.
 
 ---
 **Maintained with 100% transparency. Your secrets remain yours.**

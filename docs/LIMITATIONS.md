@@ -96,7 +96,7 @@ FATAL ERROR: Both execution and rollback sessions are dead.
 ### Mitigation
 1. **Keep batches small and fast.** A 10-operation batch completes in milliseconds. A 100-operation batch creates a multi-second window where a session can expire.
 2. **Avoid long transactions on unstable networks (mobile hotspot, public Wi-Fi).** The proxy relies on the session remaining valid for the full duration of the batch.
-3. **The WAL is your idempotent safety net.** After a session timeout crash, the WAL is preserved at `~/.bw_blind_proxy/wal/pending_transaction.json`. On the next tool call, `check_recovery()` reads it and re-attempts the rollback using your fresh session.
+3. **The WAL is your idempotent safety net.** After a session timeout crash, the encrypted WAL is preserved at `~/.bw_blind_proxy/wal/pending_transaction.wal`. On the next tool call, `check_recovery()` re-prompts for the Master Password, decrypts the WAL via PBKDF2/Fernet, and re-attempts the rollback using your fresh session.
 
    **Crucially:** If the system also crashes *while rolling back* (e.g., two back-to-back Ctrl+C), the WAL is not corrupted. After each successful rollback command, `pop_rollback_command()` removes it from the WAL file on disk. The next recovery attempt picks up **exactly where it left off** — no command is ever applied twice.
 

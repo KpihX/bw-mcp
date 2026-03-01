@@ -1,0 +1,39 @@
+# CHANGELOG: The Sovereign Journey of BW-Blind-Proxy 🛡️
+
+All notable changes to this project, from its inception to the current secure state.
+
+## [v1.2.0] - 2026-03-01: The Ironclad Hardening (Current / Finalizing)
+### 🔒 Security & Cryptography
+- **Encrypted WAL**: Transitioned from plaintext `.json` to encrypted `.wal` format using **Fernet (AES-128-CBC + HMAC)**.
+- **Key Derivation**: Implemented **PBKDF2-HMAC-SHA256** with 480,000 iterations and 16-byte cryptographic salts for WAL security.
+- **Memory Safety**: Extreme migration from `str` to `bytearray` for all sensitive credentials (Master Password, Session Key).
+- **Proactive Memory Wiping**: Implemented native in-place byte-overwriting (`key[i]=0`) in `finally` blocks to defeat memory forensics.
+- **Global Scrubber**: Developed `scrubber.py` with `deep_scrub_payload` to recursively purge secrets from all log files and terminal outputs.
+- **Error Sanitization**: Introduced `_safe_error_message` to block LLM-based side-channel attacks via Pydantic `ValidationError` strings.
+
+### 🏗️ Architectural Refactor
+- **Isolated Destructive Actions**: Enforced a "Standalone Batch" rule for `delete_attachment` and `delete_folder` to handle Bitwarden's hard-delete nature.
+- **Folder Action Correction**: Removed `restore_folder` (invalid CLI command) and finalized folder management logic.
+- **Full Security Audit**: Created `AUDIT.md` documenting the 6 layers of defense-in-depth.
+
+## [v1.1.0] - 2026-02-28: ACID Resilience & Durability
+### ✨ Features
+- **ACID Transaction Engine**: Implementation of the 3-phase commit engine (Virtual Vault RAM Simulation → Encrypted WAL → LIFO Rollback).
+- **Idempotent Rollback**: Redesigned the WAL to consume commands incrementally, preventing double-application during recovery crashes.
+- **AI Introspection Tools**: Added `get_capabilities_overview`, `get_proxy_audit_context`, and `inspect_transaction_log` for LLM self-awareness.
+- **Advanced Search**: Decoupled search API with tri-state trash support and organization/collection filtering.
+
+### 📊 Documentation & Transparency
+- **Illustration-First Mandate**: Full conversion of all documentation to rich ASCII art schemas for absolute terminal compatibility.
+- **Simulation Series**: Created a 01-08 walkthrough series detailing every core mechanism from protocol to WAL resilience.
+
+## [v1.0.0] - 2026-02-28: Total-Blind Foundation
+### 🧱 Core Infrastructure
+- **MCP Server Architecture**: Initial deployment using `FastMCP`.
+- **Blind Schemas**: Pydantic models defining the "Total Blind" philosophy (secrets are redacted before reaching the LLM).
+- **Null-Aware Redaction**: Introduced `[REDACTED_BY_PROXY_POPULATED]` and `[REDACTED_BY_PROXY_EMPTY]` to give metadata context without exposure.
+- **100% API Coverage**: Initial mapping of 17 StrEnum actions (later refined to 16).
+- **Zenity HITL**: Integration of native Linux popups for secure Master Password capture and destruction approval.
+
+---
+*Created with the philosophy of Zero Trust, Total Transparency, and Total Blind.*

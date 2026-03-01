@@ -28,15 +28,40 @@ def test_extreme_edge_actions():
             {"action": "restore_item", "target_id": "test-id"},
             {"action": "toggle_reprompt", "target_id": "test-id", "reprompt": True},
             {"action": "move_to_collection", "target_id": "test-id", "organization_id": "org-55"},
-            {"action": "restore_folder", "target_id": "folder-id"}
         ]
     }
     payload = TransactionPayload(**raw)
-    assert len(payload.operations) == 4
+    assert len(payload.operations) == 3
     assert payload.operations[0].action == ItemAction.RESTORE
     assert payload.operations[1].reprompt is True
     assert payload.operations[2].organization_id == "org-55"
-    assert payload.operations[3].action == FolderAction.RESTORE
+
+
+def test_delete_folder_must_be_standalone():
+    """Ensure that delete_folder is always rejected when bundled with other actions."""
+    raw_invalid = {
+        "rationale": "Trying to rename + delete folder in one shot",
+        "operations": [
+            {"action": "rename_item", "target_id": "item-id", "new_name": "Renamed"},
+            {"action": "delete_folder", "target_id": "folder-id"}
+        ]
+    }
+    with pytest.raises(Exception) as exc_info:
+        TransactionPayload(**raw_invalid)
+    assert "delete_folder" in str(exc_info.value).lower() or "disruptive" in str(exc_info.value).lower()
+
+
+def test_delete_folder_standalone_is_valid():
+    """Ensure that delete_folder is accepted when alone in the batch."""
+    raw = {
+        "rationale": "Cleaning up an empty folder.",
+        "operations": [
+            {"action": "delete_folder", "target_id": "folder-id"}
+        ]
+    }
+    payload = TransactionPayload(**raw)
+    assert len(payload.operations) == 1
+    assert payload.operations[0].action == FolderAction.DELETE
 
 def test_delete_attachment_must_be_standalone():
     """Ensure that the proxy fiercely rejects grouping delete_attachment with other actions."""

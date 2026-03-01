@@ -1,14 +1,18 @@
 import json
-import pytest
-from bw_blind_proxy.server import get_capabilities_overview, get_proxy_audit_context, inspect_transaction_log
-from bw_blind_proxy.config import MAX_BATCH_SIZE
+from bw_blind_proxy.server import mcp, get_proxy_audit_context, inspect_transaction_log, sync_vault
+from bw_blind_proxy.config import MAX_BATCH_SIZE, REDACTED_POPULATED
 
-def test_get_capabilities_overview():
-    res = get_capabilities_overview()
-    assert isinstance(res, str)
-    assert "Zero Trust" in res
-    assert str(MAX_BATCH_SIZE) in res
-    assert "REDACTED_BY_PROXY_POPULATED" in res
+def test_sync_vault():
+    res = sync_vault()
+    assert "successfully synchronized" in res or "Sync failed" in res
+
+def test_mcp_meta_prompt_instructions():
+    # Verify that the core security rules are presence in the server instructions
+    instructions = mcp.instructions
+    assert "Zero Trust" in instructions
+    assert str(MAX_BATCH_SIZE) in instructions
+    assert REDACTED_POPULATED in instructions
+    assert "ACID ENGINE" in instructions
 
 def test_get_proxy_audit_context():
     res = get_proxy_audit_context(limit=2)

@@ -1,15 +1,17 @@
 import json
 import copy
 import uuid
+import base64
 from typing import List, Dict, Any, Callable, Tuple, Optional
 from .models import (
     TransactionPayload, VaultTransactionAction, ItemAction, 
     FolderAction, EditAction, TransactionStatus
 )
-from .subprocess_wrapper import SecureSubprocessWrapper, SecureBWError
+from .subprocess_wrapper import SecureSubprocessWrapper, SecureBWError, _sanitize_args_for_log, _safe_error_message
 from .ui import HITLManager
 from .wal import WALManager
 from .logger import TransactionLogger
+from .scrubber import deep_scrub_payload
 
 class TransactionManager:
     """
@@ -21,7 +23,8 @@ class TransactionManager:
     def _perform_rollback(
         tx_id: str,
         rollback_stack: List[Dict[str, Any]],
-        session_key: str
+        master_password: bytearray,
+        session_key: bytearray
     ) -> Dict[str, Any]:
         """
         Core LIFO rollback engine, shared by execute_batch and check_recovery.
@@ -45,10 +48,11 @@ class TransactionManager:
                 if args and args[0] == "bw":
                     # Strip "bw" — SecureSubprocessWrapper.execute prepends it automatically
                     SecureSubprocessWrapper.execute(args[1:], session_key)
-                    executed.append(" ".join(args))
+                    # Sanitize before storing — never log base64 payloads
+                    executed.append(_sanitize_args_for_log(args))
                     
                     # 💡 Consume the executed command from WAL incrementally
-                    WALManager.pop_rollback_command(tx_id)
+                    WALManager.pop_rollback_command(tx_id, master_password)
                     
             return {"success": True, "executed": executed, "failed_cmd": None, "error": None}
         except Exception as e:
@@ -57,11 +61,12 @@ class TransactionManager:
             failed_cmd = None
             if rb_idx < len(rollback_lifo_list):
                 args = rollback_lifo_list[rb_idx].get("cmd", [])
-                failed_cmd = " ".join(args)
-            return {"success": False, "executed": executed, "failed_cmd": failed_cmd, "error": str(e)}
+                # Sanitize before storing — never log base64 payloads
+                failed_cmd = _sanitize_args_for_log(args)
+            return {"success": False, "executed": executed, "failed_cmd": failed_cmd, "error": _safe_error_message(e)}
 
     @staticmethod
-    def check_recovery(session_key: str) -> Optional[str]:
+    def check_recovery(master_password: bytearray, session_key: bytearray) -> Optional[str]:
         """
         Checks the WAL for orphaned transactions resulting from a hard crash.
         If found, calls _perform_rollback to restore vault integrity.
@@ -74,11 +79,11 @@ class TransactionManager:
         if not WALManager.has_pending_transaction():
             return None
             
-        wal_data = WALManager.read_wal()
+        wal_data = WALManager.read_wal(master_password)
         tx_id = wal_data.get("transaction_id", "UNKNOWN")
         rollback_stack = wal_data.get("rollback_commands", [])
         
-        result = TransactionManager._perform_rollback(tx_id, rollback_stack, session_key)
+        result = TransactionManager._perform_rollback(tx_id, rollback_stack, master_password, session_key)
         
         # Synthetic Pydantic payload used to produce a log entry for this recovery event
         mock_payload = TransactionPayload(
@@ -130,24 +135,30 @@ class TransactionManager:
         try:
             payload = TransactionPayload(**payload_dict)
         except Exception as e:
-            return f"Error: Invalid transaction payload. {str(e)}"
+            # Pydantic's ValidationError includes rejected field VALUES in str(e),
+            # which could leak secrets the LLM tried to smuggle through.
+            # We only expose the structural error type, not the content.
+            return f"Error: Invalid transaction payload. {_safe_error_message(e)}"
             
         if not payload.operations:
             return "Error: No operations provided in the transaction payload."
             
-        approved = HITLManager.review_transaction(payload)
-        if not approved:
-            return "Transaction aborted by the user."
-            
         try:
-            master_password = HITLManager.ask_master_password(title="Approve Transaction - Enter Master Password")
+            master_password = HITLManager.ask_master_password(title="Unlock Vault for Transaction Review")
         except Exception as e:
-            return f"Transaction aborted: {str(e)}"
+            return f"Transaction aborted: {_safe_error_message(e)}"
             
         try:
             session_key = SecureSubprocessWrapper.unlock_vault(master_password)
         except SecureBWError as e:
             return f"Transaction failed during unlock: {str(e)}"
+            
+        id_to_name = TransactionManager._resolve_action_names(payload.operations, session_key)
+            
+        approved = HITLManager.review_transaction(payload, id_to_name=id_to_name)
+        if not approved:
+            for i in range(len(session_key)): session_key[i] = 0
+            return "Transaction aborted by the user."
             
         results = []
         executed_ops: List[str] = []
@@ -161,7 +172,7 @@ class TransactionManager:
         logger_err = None
         
         # Initialize WAL
-        WALManager.write_wal(tx_id, rollback_stack)
+        WALManager.write_wal(tx_id, rollback_stack, master_password)
         
         try:
             for op in payload.operations:
@@ -174,12 +185,12 @@ class TransactionManager:
                 if rollback_cmds:
                     # Append commands in reverse to maintain LIFO execution during rollback
                     rollback_stack.extend(reversed(rollback_cmds))
-                    WALManager.write_wal(tx_id, rollback_stack)
+                    WALManager.write_wal(tx_id, rollback_stack, master_password)
                     
             WALManager.clear_wal()
             return "Transaction completed successfully.\n" + "\n".join(results)
         except Exception as main_err:
-            logger_err = str(main_err)
+            logger_err = _safe_error_message(main_err)
             
             # Since the current op caused the exception, it's not in executed_ops
             # We can deduce the failed operation by looking at the len of executed_ops
@@ -189,7 +200,7 @@ class TransactionManager:
                 
             logger_status = TransactionStatus.ROLLBACK_TRIGGERED
             # Delegate to the shared engine — no WAL mutation inside (except popping)
-            rb_result = TransactionManager._perform_rollback(tx_id, rollback_stack, session_key)
+            rb_result = TransactionManager._perform_rollback(tx_id, rollback_stack, master_password, session_key)
             
             executed_rolled_back_cmds = rb_result["executed"]
             failed_rollback_cmd = rb_result["failed_cmd"]
@@ -198,16 +209,20 @@ class TransactionManager:
                 WALManager.clear_wal()
                 logger_status = TransactionStatus.ROLLBACK_SUCCESS
                 
-                err_msg = f"CRITICAL: Transaction failed during the following operation:\n{json.dumps(failed_op, indent=2)}\n\nError: {str(main_err)}\n\n"
+                safe_err = _safe_error_message(main_err)
+                # Scrub failed_op before returning to LLM to prevent leaking secret field values
+                scrubbed_failed_op = deep_scrub_payload(failed_op) if failed_op else None
+                err_msg = f"CRITICAL: Transaction failed during the following operation:\n{json.dumps(scrubbed_failed_op, indent=2)}\n\nError: {safe_err}\n\n"
                 err_msg += f"A full rollback was successfully performed. The {len(executed_rolled_back_cmds)} commands executed to revert your previous {len(executed_ops)} operations have reversed the vault back to its pristine state."
                 return err_msg
             else:
                 logger_status = TransactionStatus.ROLLBACK_FAILED
+                safe_err = _safe_error_message(main_err)
                 # Enrich logger_err with the full dual error chain for total log transparency
-                logger_err = f"ExecutionError: {str(main_err)} | RollbackError: {rb_result['error']}"
+                logger_err = f"ExecutionError: {safe_err} | RollbackError: {rb_result['error']}"
                 
                 fatal_msg = f"FATAL ERROR: Transaction failed, AND the rollback mechanism also failed. Vault is in an inconsistent state!\n"
-                fatal_msg += f"Execution Error: {str(main_err)}\n"
+                fatal_msg += f"Execution Error: {safe_err}\n"
                 fatal_msg += f"Rollback Error: {rb_result['error']}\n\n"
                 fatal_msg += f"The following rollback commands successfully executed before crash: {json.dumps(executed_rolled_back_cmds)}\n"
                 fatal_msg += f"The command that failed to rollback: {failed_rollback_cmd}\n"
@@ -225,14 +240,47 @@ class TransactionManager:
                 executed_rolled_back_cmds=executed_rolled_back_cmds,
                 failed_rollback_cmd=failed_rollback_cmd
             )
-            sk_bytes = bytearray(session_key, 'utf-8')
-            for i in range(len(sk_bytes)):
-                sk_bytes[i] = 0
-            del sk_bytes
+            for i in range(len(session_key)):
+                session_key[i] = 0
             del session_key
+            for i in range(len(master_password)):
+                master_password[i] = 0
+            del master_password
 
     @staticmethod
-    def _execute_single_action(op: VaultTransactionAction, session_key: str) -> Tuple[str, Optional[List[Dict[str, Any]]]]:
+    def _resolve_action_names(operations: List[VaultTransactionAction], session_key: bytearray) -> Dict[str, str]:
+        """
+        Connects to Bitwarden to resolve UUIDs into human-readable names for UI display.
+        """
+        uuids_to_resolve = set()
+        for op in operations:
+            if getattr(op, "target_id", None): uuids_to_resolve.add(op.target_id)
+            if getattr(op, "folder_id", None): uuids_to_resolve.add(op.folder_id)
+            if getattr(op, "organization_id", None): uuids_to_resolve.add(op.organization_id)
+            
+        id_to_name = {}
+        for uid in uuids_to_resolve:
+            if not uid: continue
+            try:
+                item = SecureSubprocessWrapper.execute_json(["get", "item", uid], session_key)
+                id_to_name[uid] = item.get("name", uid)
+                continue
+            except Exception: pass
+            
+            try:
+                folder = SecureSubprocessWrapper.execute_json(["get", "folder", uid], session_key)
+                id_to_name[uid] = folder.get("name", uid)
+                continue
+            except Exception: pass
+                
+            try:
+                org = SecureSubprocessWrapper.execute_json(["get", "organization", uid], session_key)
+                id_to_name[uid] = org.get("name", uid)
+            except Exception: pass
+        return id_to_name
+
+    @staticmethod
+    def _execute_single_action(op: VaultTransactionAction, session_key: bytearray) -> Tuple[str, Optional[List[Dict[str, Any]]]]:
         
         # Helper to encapsulate the common get -> edit cycle safely
         def safe_edit_item(target_id: str, field_updater: Callable) -> Tuple[str, List[Dict[str, Any]]]:
@@ -240,11 +288,12 @@ class TransactionManager:
             item_data = copy.deepcopy(original_item_data)
             
             field_updater(item_data)
-            encoded_json = json.dumps(item_data)
-            SecureSubprocessWrapper.execute(["edit", "item", target_id, encoded_json], session_key)
+            # bw edit requires base64-encoded JSON
+            encoded_b64 = base64.b64encode(json.dumps(item_data).encode()).decode()
+            SecureSubprocessWrapper.execute(["edit", "item", target_id, encoded_b64], session_key)
             
-            orig_json = json.dumps(original_item_data)
-            rollback_cmds = [{"cmd": ["bw", "edit", "item", target_id, orig_json]}]
+            orig_b64 = base64.b64encode(json.dumps(original_item_data).encode()).decode()
+            rollback_cmds = [{"cmd": ["bw", "edit", "item", target_id, orig_b64]}]
                 
             return target_id, rollback_cmds
 
@@ -279,8 +328,9 @@ class TransactionManager:
                         id_tpl[k] = v
                 item_tpl["identity"] = id_tpl
                 
-            encoded_json = json.dumps(item_tpl)
-            res_str = SecureSubprocessWrapper.execute(["create", "item", encoded_json], session_key)
+            # bw create requires base64-encoded JSON
+            encoded_b64 = base64.b64encode(json.dumps(item_tpl).encode()).decode()
+            res_str = SecureSubprocessWrapper.execute(["create", "item", encoded_b64], session_key)
             
             try:
                 new_id = json.loads(res_str).get("id")
@@ -325,8 +375,8 @@ class TransactionManager:
         elif op.action == ItemAction.MOVE_TO_COLLECTION:
             original_item_data = SecureSubprocessWrapper.execute_json(["get", "item", op.target_id], session_key)
             SecureSubprocessWrapper.execute(["move", op.target_id, op.organization_id], session_key)
-            orig_json = json.dumps(original_item_data)
-            rollback_cmds = [{"cmd": ["bw", "edit", "item", op.target_id, orig_json]}]
+            orig_b64 = base64.b64encode(json.dumps(original_item_data).encode()).decode()
+            rollback_cmds = [{"cmd": ["bw", "edit", "item", op.target_id, orig_b64]}]
             return f"-> Moved item {op.target_id} to Organization {op.organization_id}", rollback_cmds
 
         elif op.action == ItemAction.TOGGLE_REPROMPT:
@@ -343,8 +393,9 @@ class TransactionManager:
         elif op.action == FolderAction.CREATE:
             folder_tpl = SecureSubprocessWrapper.execute_json(["get", "template", "folder"], session_key)
             folder_tpl["name"] = op.name
-            encoded_json = json.dumps(folder_tpl)
-            res_str = SecureSubprocessWrapper.execute(["create", "folder", encoded_json], session_key)
+            # bw create requires base64-encoded JSON
+            encoded_b64 = base64.b64encode(json.dumps(folder_tpl).encode()).decode()
+            res_str = SecureSubprocessWrapper.execute(["create", "folder", encoded_b64], session_key)
             
             try:
                 new_id = json.loads(res_str).get("id")
@@ -361,24 +412,23 @@ class TransactionManager:
             original_folder = SecureSubprocessWrapper.execute_json(["get", "folder", op.target_id], session_key)
             folder_data = copy.deepcopy(original_folder)
             folder_data["name"] = op.new_name
-            encoded_json = json.dumps(folder_data)
-            SecureSubprocessWrapper.execute(["edit", "folder", op.target_id, encoded_json], session_key)
+            # bw edit requires base64-encoded JSON
+            encoded_b64 = base64.b64encode(json.dumps(folder_data).encode()).decode()
+            SecureSubprocessWrapper.execute(["edit", "folder", op.target_id, encoded_b64], session_key)
             
-            orig_json = json.dumps(original_folder)
-            rollback_cmds = [{"cmd": ["bw", "edit", "folder", op.target_id, orig_json]}]
+            orig_b64 = base64.b64encode(json.dumps(original_folder).encode()).decode()
+            rollback_cmds = [{"cmd": ["bw", "edit", "folder", op.target_id, orig_b64]}]
                 
             return f"-> Renamed folder {op.target_id} to '{op.new_name}'", rollback_cmds
             
         elif op.action == FolderAction.DELETE:
             SecureSubprocessWrapper.execute(["delete", "folder", op.target_id], session_key)
-            rollback_cmds = [{"cmd": ["bw", "restore", "folder", op.target_id]}]
+            # delete_folder is enforced to be a standalone batch (size 1).
+            # If it succeeds, there is nothing else in the batch to roll back.
+            # If it fails, nothing was executed. Either way, rollback_cmds is empty.
+            rollback_cmds = []
             return f"-> Deleted folder {op.target_id}", rollback_cmds
 
-        elif op.action == FolderAction.RESTORE:
-            SecureSubprocessWrapper.execute(["restore", "folder", op.target_id], session_key)
-            rollback_cmds = [{"cmd": ["bw", "delete", "folder", op.target_id]}]
-            return f"-> Restored folder {op.target_id} from trash", rollback_cmds
-            
         # --- EDIT ACTIONS ---
         elif op.action == EditAction.LOGIN: 
             def u(data):

@@ -8,3 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Agent-internal docs (not pushed to remotes)
+MEMORY.md
+AGENT.md

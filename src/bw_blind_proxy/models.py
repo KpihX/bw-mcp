@@ -22,7 +22,11 @@ class FolderAction(StrEnum):
     CREATE = "create_folder"
     RENAME = "rename_folder"
     DELETE = "delete_folder"
-    RESTORE = "restore_folder"
+    # NOTE: restore_folder does NOT exist in the Bitwarden CLI.
+    # Folders are hard-deleted (no trash). Removing a folder also clears
+    # the folderId of all items inside, making rollback architecturally
+    # unsolvable without pre-deletion snapshots. delete_folder is therefore
+    # enforced to run as a standalone transaction (like delete_attachment).
 
 class EditAction(StrEnum):
     LOGIN = "edit_item_login"
@@ -146,7 +150,7 @@ class BlindItem(BaseModel):
     """
     model_config = ConfigDict(extra="ignore")
     
-    id: str
+    id: Optional[str] = None
     organizationId: Optional[str] = None
     folderId: Optional[str] = None
     type: int
@@ -173,14 +177,14 @@ class BlindFolder(BaseModel):
     """Strict representation of a Bitwarden Folder."""
     model_config = ConfigDict(extra="ignore")
     
-    id: str
+    id: Optional[str] = None
     name: str
 
 class BlindOrganization(BaseModel):
     """Strict representation of a Bitwarden Organization."""
     model_config = ConfigDict(extra="ignore")
     
-    id: str
+    id: Optional[str] = None
     name: str
 
 class BlindOrganizationCollection(BaseModel):
@@ -302,10 +306,6 @@ class DeleteFolderAction(BaseAction):
     action: Literal[FolderAction.DELETE] = FolderAction.DELETE
     target_id: str
 
-class RestoreFolderAction(BaseAction):
-    action: Literal[FolderAction.RESTORE] = FolderAction.RESTORE
-    target_id: str
-
 # --- EDIT ACTIONS ---
 class EditItemLoginAction(BaseAction):
     action: Literal[EditAction.LOGIN] = EditAction.LOGIN
@@ -366,8 +366,7 @@ VaultTransactionAction = Annotated[
         DeleteAttachmentAction,
         CreateFolderAction, 
         RenameFolderAction, 
-        DeleteFolderAction, 
-        RestoreFolderAction,
+        DeleteFolderAction,
         EditItemLoginAction,
         EditItemCardAction,
         EditItemIdentityAction,
@@ -384,13 +383,22 @@ class TransactionPayload(BaseModel):
     rationale: str = Field(..., description="Explain to the host human why you are proposing these exact changes.")
 
     @model_validator(mode='after')
-    def isolate_unrecoverable_actions(self) -> 'TransactionPayload':
+    def isolate_disruptive_actions(self) -> 'TransactionPayload':
         """
-        Enforce that unrecoverable actions (like delete_attachment)
-        must be executed as a standalone transaction to minimize collateral risk.
+        Enforce that certain high-risk actions must be executed as standalone
+        transactions to minimize collateral risk:
+
+        - 'delete_attachment': UNRECOVERABLE (bypasses Bitwarden Trash entirely).
+        - 'delete_folder': DISRUPTIVE (hard delete — folders have no trash).
+          All items in the folder lose their folderId. Cannot be rolled back
+          if bundled with other operations because folderId info is destroyed
+          on execution and cannot be reconstructed post-hoc.
         """
         has_attachment_deletion = any(
             op.action == ItemAction.DELETE_ATTACHMENT for op in self.operations
+        )
+        has_folder_deletion = any(
+            op.action == FolderAction.DELETE for op in self.operations
         )
         
         if has_attachment_deletion and len(self.operations) > 1:
@@ -399,6 +407,14 @@ class TransactionPayload(BaseModel):
                 "Because it cannot be rolled back safely if another operation in the batch fails, "
                 "you MUST send this action completely isolated in its own batch of size 1. "
                 "Do not bundle it with other operations."
+            )
+
+        if has_folder_deletion and len(self.operations) > 1:
+            raise ValueError(
+                "CRITICAL SECURITY RULE: The 'delete_folder' action is DISRUPTIVE and cannot be bundled. "
+                "Bitwarden folders are hard-deleted (no trash). All items inside lose their folder reference. "
+                "Rolling back a folder deletion in a mixed transaction is architecturally unsolvable. "
+                "You MUST send 'delete_folder' completely isolated in its own batch of size 1."
             )
             
         return self

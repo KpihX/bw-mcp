@@ -6,6 +6,9 @@ from rich.table import Table
 from rich.json import JSON
 
 from .logger import LOG_DIR, TransactionLogger
+from .wal import WALManager
+from .models import TransactionStatus
+from .scrubber import deep_scrub_payload
 
 app = typer.Typer(help="BW-Blind-Proxy Management & Audit CLI")
 console = Console()
@@ -57,20 +60,40 @@ def view_log(
         console.print(JSON(json.dumps(log_data)))
         
     except ValueError as e:
-        console.print(f"[red]{str(e)}[/red]")
+        console.print(f"[red]{type(e).__name__}: {str(e)}[/red]")
     except Exception as e:
-        console.print(f"[red]Error reading log: {str(e)}[/red]")
+        console.print(f"[red]Error reading log: {type(e).__name__}[/red]")
 
 @app.command("wal", help="Inspect the Write-Ahead Log for any stranded transactions.")
 def view_wal():
     if WALManager.has_pending_transaction():
-        data = WALManager.read_wal()
-        console.print(f"[red bold]CRITICAL: Uncommitted transaction found in WAL![/red bold]")
-        console.print(f"Transaction ID: {data.get('transaction_id')}")
-        console.print(f"Pending Rollback Commands stack size: {len(data.get('rollback_commands', []))}")
-        console.print("\n[cyan]Full WAL state:[/cyan]")
-        console.print(JSON(json.dumps(data)))
-        console.print("\nThe proxy will automatically resolve this upon the next MCP execution.")
+        # Typer prompt inherently returns an immutable string.
+        # We cast immediately to a bytearray so downstream functions can wipe it.
+        mp_str = typer.prompt("Enter Master Password to decrypt WAL", hide_input=True)
+        master_password = bytearray(mp_str, "utf-8")
+        # Overwrite the original string reference in python's namespace
+        mp_str = "DEADBEEF" * 10
+        del mp_str
+        
+        try:
+            wal_data = WALManager.read_wal(master_password)
+            if not wal_data:
+                console.print(f"[red]Failed to read or decrypt the WAL file.[/red]")
+                return
+            
+            console.print(f"[red bold]CRITICAL: Uncommitted transaction found in WAL![/red bold]")
+            console.print(f"Transaction ID: {wal_data.get('transaction_id')}")
+            console.print(f"Pending Rollback Commands stack size: {len(wal_data.get('rollback_commands', []))}")
+            console.print("\n[cyan]Full WAL state (secrets scrubbed):[/cyan]")
+            console.print(JSON(json.dumps(deep_scrub_payload(wal_data))))
+            console.print("\nThe proxy will automatically resolve this upon the next MCP execution.")
+            
+        except ValueError as e:
+            console.print(f"[red bold]Decryption Failed: Incorrect Master Password or corrupted WAL.[/red bold]")
+        finally:
+            for i in range(len(master_password)):
+                master_password[i] = 0
+            del master_password
     else:
         console.print("[green]WAL is clean. No stranded transactions. Vault is perfectly synced.[/green]")
 

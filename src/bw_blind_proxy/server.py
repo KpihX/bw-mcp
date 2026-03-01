@@ -1,8 +1,10 @@
+import json
+
 from mcp.server.fastmcp import FastMCP
 from typing import Dict, Any, List, Optional
 
 from .config import load_config, MAX_BATCH_SIZE, REDACTED_POPULATED
-from .subprocess_wrapper import SecureSubprocessWrapper, SecureBWError
+from .subprocess_wrapper import SecureSubprocessWrapper, SecureBWError, _safe_error_message
 from .models import BlindItem, BlindFolder, BlindOrganization, BlindOrganizationCollection, TransactionPayload
 from .transaction import TransactionManager
 from .logger import TransactionLogger
@@ -13,8 +15,19 @@ from .ui import HITLManager
 config = load_config()
 SERVER_NAME = config.get("proxy", {}).get("name", "BW-Blind-Proxy")
 
-# Initialize Server
-mcp = FastMCP(SERVER_NAME)
+# Initialize Server with a system meta-prompt for immediate context & zero-latency alignment
+mcp = FastMCP(
+    SERVER_NAME,
+    instructions=f"""
+You are a Bitwarden Agent operating through a SECURE BLIND PROXY (Zero Trust). 
+**CRITICAL OPERATIONAL RULES:**
+1. AI-BLIND: Secrets are REDACTED as '{REDACTED_POPULATED}'. Do NOT attempt to read or modify them.
+2. BATCH LIMIT: Strictly limited to {MAX_BATCH_SIZE} operations per transaction to minimize race conditions.
+3. ACID ENGINE: Every transaction is Atomic (All-or-Nothing) and backed by a Write-Ahead Log (WAL).
+4. HUMAN-IN-THE-LOOP: provide a clear 'rationale' for every proposal to convince the human to approve.
+5. SELF-AUDIT: If a transaction crashes, use 'get_proxy_audit_context' and 'inspect_transaction_log' to diagnose and propose manual recovery steps.
+"""
+)
 
 @mcp.tool()
 def get_vault_map(
@@ -37,12 +50,12 @@ def get_vault_map(
         master_password = HITLManager.ask_master_password(title="Proxy Request: Read Vault Map")
         session_key = SecureSubprocessWrapper.unlock_vault(master_password)
         
-        recovery_msg = TransactionManager.check_recovery(session_key)
+        recovery_msg = TransactionManager.check_recovery(master_password, session_key)
         if recovery_msg:
             return recovery_msg
             
     except Exception as e:
-        return f"Access Denied or Recovery Failed: {str(e)}"
+        return f"Access Denied or Recovery Failed: {_safe_error_message(e)}"
         
     try:
         items_base_args = ["list", "items"]
@@ -80,11 +93,17 @@ def get_vault_map(
             trash_folders = [BlindFolder(**f).model_dump(exclude_unset=True) for f in raw_trash_folders]
         
         if include_orgs:
-            raw_orgs = SecureSubprocessWrapper.execute_json(["list", "organizations"], session_key)
-            organizations = [BlindOrganization(**o).model_dump(exclude_unset=True) for o in raw_orgs]
-            
-            raw_cols = SecureSubprocessWrapper.execute_json(["list", "org-collections"], session_key)
-            collections = [BlindOrganizationCollection(**c).model_dump(exclude_unset=True) for c in raw_cols]
+            try:
+                # Organizations can fail if user doesn't belong to any or if CLI returns error
+                raw_orgs = SecureSubprocessWrapper.execute_json(["list", "organizations"], session_key)
+                organizations = [BlindOrganization(**o).model_dump(exclude_unset=True) for o in raw_orgs]
+                
+                raw_cols = SecureSubprocessWrapper.execute_json(["list", "org-collections"], session_key)
+                collections = [BlindOrganizationCollection(**c).model_dump(exclude_unset=True) for c in raw_cols]
+            except Exception:
+                # Silently ignore org failures to allow personal vault access
+                organizations = []
+                collections = []
         
         result = {
             "status": "success",
@@ -106,14 +125,31 @@ def get_vault_map(
     except SecureBWError as e:
         return f"Bitwarden CLI Error: {str(e)}"
     except Exception as e:
-        return f"Proxy Internal Error during serialization: {str(e)}"
+        return f"Proxy Internal Error during serialization: {_safe_error_message(e)}"
     finally:
-        # Clean session key from memory
-        sk_bytes = bytearray(session_key, 'utf-8')
-        for i in range(len(sk_bytes)):
-            sk_bytes[i] = 0
-        del sk_bytes
-        del session_key
+        # Clean session key and master password from memory securely
+        if 'session_key' in locals():
+            for i in range(len(session_key)):
+                session_key[i] = 0
+            del session_key
+        if 'master_password' in locals():
+            for i in range(len(master_password)):
+                master_password[i] = 0
+            del master_password
+
+@mcp.tool()
+def sync_vault() -> str:
+    """
+    Forces the Bitwarden CLI to synchronize its local encrypted cache with the server.
+    Call this if you suspect the vault map is outdated or after a large external import.
+    This does NOT require the Master Password.
+    """
+    try:
+        SecureSubprocessWrapper.execute_raw(["sync"])
+        return "Vault successfully synchronized with the server."
+    except Exception as e:
+        return f"Sync failed: {str(e)}"
+
 
 @mcp.tool()
 def propose_vault_transaction(rationale: str, operations: List[Dict[str, Any]]) -> str:
@@ -150,16 +186,19 @@ def propose_vault_transaction(rationale: str, operations: List[Dict[str, Any]]) 
              WARNING: Destructive & UNRECOVERABLE. MUST be the ONLY operation in the batch.
           
           [FOLDER ACTIONS]
-          9. "create_folder" -> Requires: name (str)
+          9.  "create_folder" -> Requires: name (str)
           10. "rename_folder" -> Requires: target_id (str), new_name (str)
-          11. "delete_folder" -> Requires: target_id (str). WARNING: Destructive.
-          12. "restore_folder" -> Requires: target_id (str). Restores from trash.
+          11. "delete_folder" -> Requires: target_id (str).
+              WARNING: DISRUPTIVE & MUST be the ONLY operation in a batch of size 1.
+              Bitwarden folders have NO trash. Deleting a folder is a hard delete.
+              All items inside will lose their folder reference (become un-foldered).
+              This action CANNOT be bundled with any other operation.
           
           [EDIT ACTIONS]
-          13. "edit_item_login" -> Requires: target_id, and optional 'username' or 'uris'. 
-          14. "edit_item_card" -> Requires: target_id, and optional 'cardholderName', 'brand', 'expMonth', 'expYear'. 
-          15. "edit_item_identity" -> Requires: target_id, and optional 'title', 'firstName', 'email', 'phone', etc.
-          16. "upsert_custom_field" -> Requires: target_id (str), name (str), value (str), type (int: 0 for Text, 2 for Boolean).
+          12. "edit_item_login" -> Requires: target_id, and optional 'username' or 'uris'. 
+          13. "edit_item_card" -> Requires: target_id, and optional 'cardholderName', 'brand', 'expMonth', 'expYear'. 
+          14. "edit_item_identity" -> Requires: target_id, and optional 'title', 'firstName', 'email', 'phone', etc.
+          15. "upsert_custom_field" -> Requires: target_id (str), name (str), value (str), type (int: 0 for Text, 2 for Boolean).
           
           Note: YOU CANNOT PASS SENSITIVE FIELDS ('password', 'totp', 'number', 'code', 'ssn', 'value' of hidden fields). ATTEMPTING TO DO SO WILL FAIL VALIDATION.
           
@@ -175,7 +214,7 @@ def propose_vault_transaction(rationale: str, operations: List[Dict[str, Any]]) 
         # Pass the raw dictionary to the Transaction Manager
         return TransactionManager.execute_batch(payload)
     except Exception as e:
-        return f"Proxy Error processing transaction: {str(e)}"
+        return f"Proxy Error processing transaction: {_safe_error_message(e)}"
 
 # Dynamically inject the MAX_BATCH_SIZE into the docstrings for the LLM context
 if propose_vault_transaction.__doc__:
@@ -186,36 +225,6 @@ if propose_vault_transaction.__doc__:
     )
 
 @mcp.tool()
-def get_capabilities_overview() -> str:
-    """
-    Returns the technical capabilities, security posture, and limitations 
-    of the BW-Blind-Proxy. Read this to understand the environment you are operating in.
-    """
-    return f"""
-# BW-Blind-Proxy Capabilities & Context
-
-**Your Role:** You are operating through a secure, air-gapped intermediary to the Bitwarden CLI.
-**Slogan:** Zero Trust · Total Transparency · Total Blind
-
-## 1. AI-Blind Environment
-You are strictly forbidden from seeing secrets. The proxy intercepts the CLI output and overwrites sensitive keys (password, totp, ssn, cvv) with `{REDACTED_POPULATED}` (or empty tag) before you ever see them. DO NOT attempt to read them.
-
-## 2. The ACID Transaction Engine
-You can propose transactions using `propose_vault_transaction()`.
-- **Atomicity:** Your proposals run in an All-or-Nothing batch.
-- **Batch Limit:** You are strictly limited to `{MAX_BATCH_SIZE}` operations per call to minimize race conditions.
-- **Rollback (WAL):** The proxy creates a Write-Ahead Log (WAL) on disk. If an operation fails mid-batch, or the PC crashes, the proxy will automatically execute LIFO compensating commands (e.g., `bw restore` after a `bw delete`) to repair the vault.
-
-## 3. Human In The Loop (HITL)
-You cannot modify the vault silently. Every time you propose a transaction, a massive Red Alert GUI popup appears on the user's screen. You must write a clear `rationale` to convince the human to click 'Approve'.
-
-## 4. Self-Auditing & Debugging
-Do not fail silently. You have access to tools to diagnose yourself:
-- Call `get_proxy_audit_context()` to check if the WAL is stranded (meaning the previous transaction crashed the PC).
-- Call `inspect_transaction_log()` to view the exact JSON trace of your past transactions. If your rollback failed, the JSON will contain a `failed_rollback` entry telling you EXACTLY what CLI command you need to run to fix the vault manually.
-"""
-
-@mcp.tool()
 def get_proxy_audit_context(limit: int = 5) -> str:
     """
     Returns the current operational status of the BW-Blind-Proxy.
@@ -224,7 +233,6 @@ def get_proxy_audit_context(limit: int = 5) -> str:
     Call this tool if you encounter a transaction failure or if you 
     need to synchronize your internal state with the system's audit trail.
     """
-    import json
     
     has_wal = WALManager.has_pending_transaction()
     wal_status_msg = "CLEAN (Vault is synchronized)" if not has_wal else "PENDING (A transaction crashed and is awaiting auto-recovery. Do NOT send new operations yet.)"
@@ -252,14 +260,14 @@ def inspect_transaction_log(tx_id: str = None, n: int = None) -> str:
         
     If BOTH arguments are empty, it defaults to returning the most recent log (n=1).
     """
-    import json
+    
     try:
         log_data = TransactionLogger.get_log_details(tx_id=tx_id, n=n)
         return json.dumps(log_data, indent=2)
     except ValueError as e:
-        return f"Error: {str(e)}"
+        return f"Error: {_safe_error_message(e)}"
     except Exception as e:
-        return f"Unexpected Error reading log: {str(e)}"
+        return f"Unexpected Error reading log: {_safe_error_message(e)}"
 
 def main():
     """Entry point for the script."""
