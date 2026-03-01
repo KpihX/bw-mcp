@@ -253,3 +253,33 @@ def test_batch_at_limit_ok():
     payload = TransactionPayload(**raw)
     assert len(payload.operations) == MAX_BATCH_SIZE
 
+def test_resolve_action_names_hallucinated_folder():
+    """Ensure that moving a folder by passing a folder ID to move_item raises SecureBWError before hitting the UI."""
+    from unittest.mock import patch
+    from bw_mcp.transaction import TransactionManager
+    from bw_mcp.subprocess_wrapper import SecureBWError
+    
+    raw = {
+        "rationale": "Hallucinated move",
+        "operations": [
+            {"action": "move_item", "target_id": "fake-folder-id-123", "folder_id": "dest-folder-id-456"}
+        ]
+    }
+    payload = TransactionPayload(**raw)
+    
+    with patch("bw_mcp.transaction.SecureSubprocessWrapper.execute_json") as mock_execute:
+        def mock_execute_json(args, session_key):
+            # The agent hallucinates and passes a folder ID to target_id (which expects an item)
+            if args == ["get", "item", "fake-folder-id-123"]:
+                raise Exception("Not found")
+            return {"name": "Dest Folder"}
+            
+        mock_execute.side_effect = mock_execute_json
+        
+        with pytest.raises(SecureBWError) as exc_info:
+            TransactionManager._resolve_action_names(payload.operations, bytearray(b"session"))
+            
+        assert "Validation Error:" in str(exc_info.value)
+        assert "fake-folder-id-123" in str(exc_info.value)
+        assert "is not a valid 'item'" in str(exc_info.value)
+

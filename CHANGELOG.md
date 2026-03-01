@@ -2,6 +2,12 @@
 
 All notable changes to this project, from its inception to the current secure state.
 
+## [v1.3.2] - 2026-03-01: Entity Validation & Pydantic StrEnum Fixes
+### 🛡️ Security & Type Hardening
+- **Active Type-Checking**: Fixed a critical validation bypass where Pydantic's underlying `str` casting of `StrEnum` models circumvented our `type(op.action)` checks. The proxy now strictly intercepts AI hallucinations (e.g., trying to `move_item` on a Folder UUID) *before* the Zenity UI appears and *before* the WAL is written.
+- **Clean LLM Bounce-back**: By securely wrapping the intercepted payload errors in `SecureBWError` (with `_safe_error_message`), the agent now receives a direct, scrubbed rationale explaining its structural mistake, allowing auto-correction without disk mutation or human UI spam.
+- **New Test Coverage**: Expanded `test_transactions.py` with mock-based validation assertions to prevent similar architectural illusions in future updates.
+
 ## [v1.3.1] - 2026-03-01: The Daemon Evolution & Batch Upgrade
 ### ⚙️ Daemon Lifecycle Control
 - **Typer CLI Overhaul**: Refactored the core `bw-mcp` entry point (`__init__.py` -> `main.py`) from a bare `main()` into a fully-fledged Typer CLI with systemd-like daemon controls.
