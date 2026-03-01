@@ -1,8 +1,8 @@
-# 🔒 BW-Blind-Proxy — Full Security Audit Report
+# 🔒 BW-MCP — Full Security Audit Report
 
 > **Date:** 2026-03-01  
 > **Auditor:** Automated Deep-Scan (4-pass systematic review)  
-> **Scope:** All source files in `src/bw_blind_proxy/`, all CLI commands, all LLM-facing tool outputs, all disk I/O, all RAM lifecycle.  
+> **Scope:** All source files in `src/bw_mcp/`, all CLI commands, all LLM-facing tool outputs, all disk I/O, all RAM lifecycle.  
 > **Verdict:** ✅ **ZERO exploitable vulnerabilities identified.** 56/56 tests pass.
 
 ---

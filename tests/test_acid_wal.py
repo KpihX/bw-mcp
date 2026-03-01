@@ -5,19 +5,19 @@ import time
 import pytest
 from unittest.mock import patch
 
-from bw_blind_proxy.wal import WALManager
-from bw_blind_proxy.logger import TransactionLogger, LOG_DIR
-from bw_blind_proxy.models import TransactionPayload
-from bw_blind_proxy.transaction import TransactionManager
-from bw_blind_proxy.subprocess_wrapper import _safe_error_message, SecureBWError
+from bw_mcp.wal import WALManager
+from bw_mcp.logger import TransactionLogger, LOG_DIR
+from bw_mcp.models import TransactionPayload
+from bw_mcp.transaction import TransactionManager
+from bw_mcp.subprocess_wrapper import _safe_error_message, SecureBWError
 
 TEST_MASTER_PASSWORD = bytearray("fake-master-password-for-wal-tests", "utf-8")
 
 def test_wal_encryption_roundtrip(tmp_path):
     """Verifies that the WAL correctly encrypts, writes, and decrypts data."""
 
-    with patch('bw_blind_proxy.wal.WAL_FILE', str(tmp_path / "pending_transaction.wal")), \
-         patch('bw_blind_proxy.wal.WAL_DIR', str(tmp_path)):
+    with patch('bw_mcp.wal.WAL_FILE', str(tmp_path / "pending_transaction.wal")), \
+         patch('bw_mcp.wal.WAL_DIR', str(tmp_path)):
 
         tx_id = "test-uuid-123"
         rollback_stack = [
@@ -54,8 +54,8 @@ def test_wal_encryption_roundtrip(tmp_path):
 def test_wal_wrong_key_fails(tmp_path):
     """Verifies that reading the WAL with a different session key returns empty dict."""
 
-    with patch('bw_blind_proxy.wal.WAL_FILE', str(tmp_path / "pending_transaction.wal")), \
-         patch('bw_blind_proxy.wal.WAL_DIR', str(tmp_path)):
+    with patch('bw_mcp.wal.WAL_FILE', str(tmp_path / "pending_transaction.wal")), \
+         patch('bw_mcp.wal.WAL_DIR', str(tmp_path)):
 
         tx_id = "test-wrong-key"
         rollback_stack = [{"cmd": ["bw", "delete", "item", "x"]}]
@@ -71,8 +71,8 @@ def test_wal_wrong_key_fails(tmp_path):
 def test_wal_pop_roundtrip(tmp_path):
     """Verifies that pop_rollback_command correctly decrypts, pops, re-encrypts."""
 
-    with patch('bw_blind_proxy.wal.WAL_FILE', str(tmp_path / "pending_transaction.wal")), \
-         patch('bw_blind_proxy.wal.WAL_DIR', str(tmp_path)):
+    with patch('bw_mcp.wal.WAL_FILE', str(tmp_path / "pending_transaction.wal")), \
+         patch('bw_mcp.wal.WAL_DIR', str(tmp_path)):
 
         tx_id = "test-pop"
         rollback_stack = [
@@ -97,7 +97,7 @@ def test_wal_pop_roundtrip(tmp_path):
 def test_logger_writes_safe_flat_files(tmp_path):
     """Verifies the logger produces immutable history without leaking Python runtime structures."""
 
-    with patch('bw_blind_proxy.logger.LOG_DIR', str(tmp_path)):
+    with patch('bw_mcp.logger.LOG_DIR', str(tmp_path)):
         payload = TransactionPayload(
             rationale="Automated Test Logging",
             operations=[
@@ -126,24 +126,24 @@ def test_logger_writes_safe_flat_files(tmp_path):
         assert ops[1]["new_name"] == "Archived"
 
 
-@patch('bw_blind_proxy.transaction.SecureSubprocessWrapper.execute')
-@patch('bw_blind_proxy.transaction.TransactionLogger.log_transaction')
+@patch('bw_mcp.transaction.SecureSubprocessWrapper.execute')
+@patch('bw_mcp.transaction.TransactionLogger.log_transaction')
 def test_transaction_auto_recovery_execution(mock_log, mock_exec, tmp_path):
     """Tests if check_recovery actually triggers the `bw` subprocess using encrypted WAL."""
 
     wal_file = str(tmp_path / "pending_transaction.wal")
 
     # 1. Write a legitimate encrypted WAL
-    with patch('bw_blind_proxy.wal.WAL_FILE', wal_file), \
-         patch('bw_blind_proxy.wal.WAL_DIR', str(tmp_path)):
+    with patch('bw_mcp.wal.WAL_FILE', wal_file), \
+         patch('bw_mcp.wal.WAL_DIR', str(tmp_path)):
         WALManager.write_wal("stranded-tx-crashes", [
             {"cmd": ["bw", "edit", "item", "id-123", "{}"]},
             {"cmd": ["bw", "restore", "folder", "f-999"]}
         ], TEST_MASTER_PASSWORD)
 
     # 2. Trap TransactionManager inside this fake WAL space
-    with patch('bw_blind_proxy.wal.WAL_FILE', wal_file), \
-         patch('bw_blind_proxy.wal.WAL_DIR', str(tmp_path)):
+    with patch('bw_mcp.wal.WAL_FILE', wal_file), \
+         patch('bw_mcp.wal.WAL_DIR', str(tmp_path)):
 
         assert WALManager.has_pending_transaction() is True
 

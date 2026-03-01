@@ -1,10 +1,10 @@
-# 🧠 Project Memory: BW-Blind-Proxy
+# 🧠 Project Memory: BW-MCP
 
-**Project:** BW-Blind-Proxy v1.2.0
+**Project:** BW-MCP v1.2.0
 **Status:** Production-Ready. 58/58 tests pass. Full security audit complete.
 **Duration:** ~24h of intensive pair-programming (2026-02-28 to 2026-03-01).
 **Stack:** Python 3.12+ · `mcp` SDK · Pydantic v2 · Fernet/PBKDF2 · Typer/Rich · Zenity
-**Distribution:** PyPI (`uv tool install bw-blind-proxy`)
+**Distribution:** PyPI (`uv tool install bw-mcp`)
 
 ---
 
@@ -178,11 +178,11 @@ If these were bundled in a batch where a later operation fails, we'd need to rol
 ## 5. 📂 Project Structure & Navigation
 
 ```
-bw-blind-proxy/
-├── src/bw_blind_proxy/
+bw-mcp/
+├── src/bw_mcp/
 │   ├── __init__.py          # FastMCP server bootstrap
-│   ├── server.py            # 5 MCP tools (get_vault_map, sync_vault, propose_vault_transaction,
-│   │                        #   get_capabilities_overview, get_proxy_audit_context, inspect_transaction_log)
+│   ├── server.py            # 4 MCP tools (get_vault_map, sync_vault, propose_vault_transaction,
+│   │                        #   get_proxy_audit_context, inspect_transaction_log)
 │   ├── models.py            # 16 StrEnum actions + Blind* read models + write schemas
 │   ├── transaction.py       # ACID engine: execute_batch, _execute_single_action, _perform_rollback
 │   ├── subprocess_wrapper.py # Secure bw CLI wrapper with bytearray lifecycle

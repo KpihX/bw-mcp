@@ -97,17 +97,24 @@ class SecureBWError(Exception):
     """
     pass
 
+class SecureProxyError(Exception):
+    """
+    Exception raised for known, safe proxy-level errors (e.g. log not found, 
+    batch too large) that are safe to expose to the LLM.
+    """
+    pass
+
 
 def _safe_error_message(e: Exception) -> str:
     """
     Return an error string safe for LLM consumption and disk logs.
 
-    - SecureBWError: already sanitized by _sanitize_args_for_log → pass through.
+    - SecureBWError/SecureProxyError: already sanitized or known safe → pass through.
     - Any other exception (JSONDecodeError, ValidationError, etc.): Python's repr
       often includes the raw data that caused the error, which may contain secrets.
       We return only the exception type name with a generic message.
     """
-    if isinstance(e, SecureBWError):
+    if isinstance(e, (SecureBWError, SecureProxyError)):
         return str(e)
     return f"{type(e).__name__}: An internal error occurred. Check server logs for details."
 

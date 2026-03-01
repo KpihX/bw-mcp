@@ -1,4 +1,4 @@
-# BW-Blind-Proxy: Simulation Exhaustive du Pipeline 🔬
+# BW-MCP: Simulation Exhaustive du Pipeline 🔬
 
 Ce document retrace le cheminement exact d'un octet de donnée, depuis la requête en langage naturel de l'utilisateur jusqu'à la destruction finale en mémoire vive (RAM) de la clé de session cryptographique.
 **Rien n'est omis. Chaque classe, chaque fonction, chaque module est détaillé dans son ordre canonique d'exécution.**

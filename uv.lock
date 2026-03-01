@@ -43,7 +43,7 @@ wheels = [
 ]
 
 [[package]]
-name = "bw-blind-proxy"
+name = "bw-mcp"
 version = "1.2.0"
 source = { editable = "." }
 dependencies = [

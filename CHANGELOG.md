@@ -1,4 +1,4 @@
-# CHANGELOG: The Sovereign Journey of BW-Blind-Proxy 🛡️
+# CHANGELOG: The Sovereign Journey of BW-MCP 🛡️
 
 All notable changes to this project, from its inception to the current secure state.
 

@@ -4,11 +4,11 @@ from unittest.mock import patch, MagicMock
 
 # Important: We patch the decorators from fastmcp out so we can test the raw function
 # The function is decorated, so we need to access its __wrapped__ attribute or test the module logic
-import bw_blind_proxy.server as server
+import bw_mcp.server as server
 
-@patch('bw_blind_proxy.server.HITLManager.ask_master_password')
-@patch('bw_blind_proxy.server.SecureSubprocessWrapper.unlock_vault')
-@patch('bw_blind_proxy.server.SecureSubprocessWrapper.execute_json')
+@patch('bw_mcp.server.HITLManager.ask_master_password')
+@patch('bw_mcp.server.SecureSubprocessWrapper.unlock_vault')
+@patch('bw_mcp.server.SecureSubprocessWrapper.execute_json')
 def test_get_vault_map_split_search(mock_exec_json, mock_unlock, mock_ask):
     """Ensure search_items and search_folders route correctly to their respective base args."""
     mock_ask.return_value = bytearray("pw", "utf-8")
@@ -26,9 +26,9 @@ def test_get_vault_map_split_search(mock_exec_json, mock_unlock, mock_ask):
     # Check Active Folders call
     assert calls[1][0][0] == ["list", "folders", "--search", "Dev"]
 
-@patch('bw_blind_proxy.server.HITLManager.ask_master_password')
-@patch('bw_blind_proxy.server.SecureSubprocessWrapper.unlock_vault')
-@patch('bw_blind_proxy.server.SecureSubprocessWrapper.execute_json')
+@patch('bw_mcp.server.HITLManager.ask_master_password')
+@patch('bw_mcp.server.SecureSubprocessWrapper.unlock_vault')
+@patch('bw_mcp.server.SecureSubprocessWrapper.execute_json')
 def test_get_vault_map_trash_state_none(mock_exec_json, mock_unlock, mock_ask):
     """Ensure trash_state='none' skips fetching the trash."""
     mock_ask.return_value = bytearray("pw", "utf-8")
@@ -45,9 +45,9 @@ def test_get_vault_map_trash_state_none(mock_exec_json, mock_unlock, mock_ask):
     assert calls[1][0][0] == ["list", "folders"]
     assert calls[2][0][0] == ["list", "organizations"]
     
-@patch('bw_blind_proxy.server.HITLManager.ask_master_password')
-@patch('bw_blind_proxy.server.SecureSubprocessWrapper.unlock_vault')
-@patch('bw_blind_proxy.server.SecureSubprocessWrapper.execute_json')
+@patch('bw_mcp.server.HITLManager.ask_master_password')
+@patch('bw_mcp.server.SecureSubprocessWrapper.unlock_vault')
+@patch('bw_mcp.server.SecureSubprocessWrapper.execute_json')
 def test_get_vault_map_trash_state_only(mock_exec_json, mock_unlock, mock_ask):
     """Ensure trash_state='only' skips fetching active items to speed up the proxy."""
     mock_ask.return_value = bytearray("pw", "utf-8")
@@ -65,9 +65,9 @@ def test_get_vault_map_trash_state_only(mock_exec_json, mock_unlock, mock_ask):
     assert calls[2][0][0] == ["list", "organizations"]
     assert calls[3][0][0] == ["list", "org-collections"]
 
-@patch('bw_blind_proxy.server.HITLManager.ask_master_password')
-@patch('bw_blind_proxy.server.SecureSubprocessWrapper.unlock_vault')
-@patch('bw_blind_proxy.server.SecureSubprocessWrapper.execute_json')
+@patch('bw_mcp.server.HITLManager.ask_master_password')
+@patch('bw_mcp.server.SecureSubprocessWrapper.unlock_vault')
+@patch('bw_mcp.server.SecureSubprocessWrapper.execute_json')
 def test_get_vault_map_folder_id(mock_exec_json, mock_unlock, mock_ask):
     """Ensure folder_id is added to the args array."""
     mock_ask.return_value = bytearray("pw", "utf-8")

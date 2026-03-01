@@ -1,6 +1,6 @@
 import pytest
-from bw_blind_proxy.ui import HITLManager
-from bw_blind_proxy.models import (
+from bw_mcp.ui import HITLManager
+from bw_mcp.models import (
     TransactionPayload, 
     RenameItemAction, 
     RestoreItemAction,
@@ -35,7 +35,7 @@ def test_ui_contains_destructive_alert():
         operations=[DeleteFolderAction(target_id="2")]
     )
     
-    with patch('bw_blind_proxy.ui.subprocess.run') as mock_run:
+    with patch('bw_mcp.ui.subprocess.run') as mock_run:
         mock_run.return_value = MagicMock(returncode=0)
         
         HITLManager.review_transaction(payload)
@@ -54,7 +54,7 @@ def test_ui_no_destructive_alert():
         operations=[RenameItemAction(target_id="1", new_name="Safe")]
     )
     
-    with patch('bw_blind_proxy.ui.subprocess.run') as mock_run:
+    with patch('bw_mcp.ui.subprocess.run') as mock_run:
         mock_run.return_value = MagicMock(returncode=0)
         
         HITLManager.review_transaction(payload)

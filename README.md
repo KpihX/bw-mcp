@@ -1,8 +1,8 @@
-# BW-Blind-Proxy 🔐🤖
+# BW-MCP 🔐🤖
 
 **Sovereign, Exhaustive, & Ultra-Secure Model Context Protocol (MCP) for Bitwarden**
 
-**BW-Blind-Proxy** is a specialized, air-gapped intermediary designed to physically isolate Large Language Models (LLMs) from your Bitwarden cryptographic secrets, while still granting them 100% organizational superpowers over your vault.
+**BW-MCP** is a specialized, air-gapped intermediary designed to physically isolate Large Language Models (LLMs) from your Bitwarden cryptographic secrets, while still granting them 100% organizational superpowers over your vault.
 
 It strongly enforces the **"AI-Blind Management"** philosophy. You can ask an AI (Claude, Cursor, Gemini) to completely reorganize your vault, rename poorly formatted accounts, manage your Enterprise Collections, update credit card expiration dates, or tag hundreds of items as favorites. *The AI will do all of this flawlessly, without ever being able to read or modify your Master Password, your TOTP seeds, your Credit Card CVVs, or your Social Security Number.*
 
@@ -107,7 +107,7 @@ Here is exactly how an AI interacts with your vault.
                     PHASE 1: READING METADATA (AI-Blind)
 ================================================================================
 
- [ AI Agent ]                       [ BW-Blind-Proxy ]               [ Bitwarden CLI ]
+ [ AI Agent ]                       [ BW-MCP ]               [ Bitwarden CLI ]
       |                                     |                                |
       | -- 1. get_vault_map() ------------> |                                |
       |                                     | -- 2. Zenity UI Prompt ------> |
@@ -127,7 +127,7 @@ Here is exactly how an AI interacts with your vault.
                     PHASE 2: BATCH EXECUTION (Write)
 ================================================================================
 
- [ AI Agent ]                       [ BW-Blind-Proxy ]               [ Bitwarden CLI ]
+ [ AI Agent ]                       [ BW-MCP ]               [ Bitwarden CLI ]
       |                                     |                                |
       | -- 5. propose_vault_transaction --> |                                |
       |                                     |   (Enum Schema Validation)     |
@@ -269,7 +269,7 @@ The proxy was killed mid-transaction (power cut, `kill -9`). On the next MCP too
 
 ### 📦 The WAL File: Your Last Line of Defense
 
-During every transaction execution, the proxy writes an **AES-encrypted Write-Ahead Log** to `~/.bw_blind_proxy/wal/pending_transaction.wal` **before** each CLI command is executed. The file is deleted once the batch completes (success or clean rollback). If it exists when the proxy starts, it's a crash signal.
+During every transaction execution, the proxy writes an **AES-encrypted Write-Ahead Log** to `~/.bw_mcp/wal/pending_transaction.wal` **before** each CLI command is executed. The file is deleted once the batch completes (success or clean rollback). If it exists when the proxy starts, it's a crash signal.
 
 #### 🔐 WAL Encryption Architecture
 
@@ -479,7 +479,7 @@ Error: Invalid transaction payload. ValidationError: An internal error occurred.
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                       BW-BLIND-PROXY — ARCHITECTURE                         │
+│                       BW-MCP — ARCHITECTURE                         │
 └─────────────────────────────────────────────────────────────────────────────┘
 
   ┌──────────────────────────┐
@@ -515,7 +515,7 @@ Error: Invalid transaction payload. ValidationError: An internal error occurred.
          ▼
   ┌──────────────────────────┐
   │  WAL Disk (Encrypted)    │  Fernet(AES-128) + PBKDF2(480k iter) + salt
-  │  ~/.bw_blind_proxy/wal/  │  chmod 600 · idempotent pop on each step
+  │  ~/.bw_mcp/wal/  │  chmod 600 · idempotent pop on each step
   └──────┬───────────────────┘
          │
          ▼
@@ -582,7 +582,7 @@ For organizational perfection, the Proxy handles advanced states without ever to
 
 ## 🔒 Security Posture & ACID Compliance
 
-The core philosophy of **BW-Blind-Proxy** is **Zero-Trust for the AI, Total-Reliability for the Human**. We achieve this by treating Bitwarden modifications as database transactions.
+The core philosophy of **BW-MCP** is **Zero-Trust for the AI, Total-Reliability for the Human**. We achieve this by treating Bitwarden modifications as database transactions.
 
 ### 📜 What is ACID?
 We implement the four pillars of database reliability to protect your vault:
@@ -612,14 +612,14 @@ When logging Bitwarden CLI commands (in rollback traces and error messages), a *
 
 Following the developer mandate of **Independent Autonomous Packages**, the configuration is internalized within the package source.
 
-*   **Location:** `src/bw_blind_proxy/config.yaml`
+*   **Location:** `src/bw_mcp/config.yaml`
 *   **Customization:** You can modify the `state_directory`, batch size, redaction tags, and cryptographic parameters.
 
 ```yaml
-# src/bw_blind_proxy/config.yaml
+# src/bw_mcp/config.yaml
 proxy:
-  name: "BW-Blind-Proxy"
-  state_directory: "~/.bw_blind_proxy"
+  name: "BW-MCP"
+  state_directory: "~/.bw_mcp"
   max_batch_size: 10
 
 redaction:
@@ -639,10 +639,10 @@ wal_crypto:
 
 ## 📂 Transparency & File Structure
 
-The proxy maintains a centralized state directory (configurable) for auditing and recovery: `~/.bw_blind_proxy/`
+The proxy maintains a centralized state directory (configurable) for auditing and recovery: `~/.bw_mcp/`
 
 ```text
-~/.bw_blind_proxy/
+~/.bw_mcp/
 ├── logs/                  # Immutable Audit Trail (Scrubbed of secrets) — JSON format
 │   ├── 2026-02-28_10-00-01_<uuid>_success.json
 │   ├── 2026-02-28_10-15-45_<uuid>_rollback_success.json
@@ -687,15 +687,15 @@ To inspect a stranded WAL, use the CLI: `uv run bw-proxy wal` (prompts for Maste
 Requires Python 3.12+ and `uv`.
 
 #### Recommended: Install via `uv tool` (PyPI)
-This installs the proxy in an isolated environment and makes the `bw-blind-proxy` command available globally.
+This installs the proxy in an isolated environment and makes the `bw-mcp` command available globally.
 ```bash
-uv tool install bw-blind-proxy
+uv tool install bw-mcp
 ```
 
 #### Alternative: Install from source
 ```bash
-git clone https://github.com/KpihX/bw-blind-proxy.git
-cd bw-blind-proxy
+git clone https://github.com/KpihX/bw-mcp.git
+cd bw-mcp
 uv sync
 uv tool install .
 ```
@@ -728,14 +728,14 @@ uv run bw-proxy purge --keep=10
 To integrate this sovereign proxy into your favorite AI agent, use the following configurations.
 
 #### 1. Recommended (Global Installation)
-If you installed the proxy via `uv tool install bw-blind-proxy`, the configuration is extremely simple:
+If you installed the proxy via `uv tool install bw-mcp`, the configuration is extremely simple:
 
 **Claude Desktop (`claude_desktop_config.json`):**
 ```json
 {
   "mcpServers": {
-    "bw-blind-proxy": {
-      "command": "bw-blind-proxy",
+    "bw-mcp": {
+      "command": "bw-mcp",
       "args": []
     }
   }
@@ -745,7 +745,7 @@ If you installed the proxy via `uv tool install bw-blind-proxy`, the configurati
 **Cursor / Other IDEs:**
 Register a new MCP server with:
 - **Type:** `command`
-- **Command:** `bw-blind-proxy`
+- **Command:** `bw-mcp`
 
 #### 2. Local Development (Fallthrough)
 If you are running from the source code without global installation:
@@ -754,13 +754,13 @@ If you are running from the source code without global installation:
 ```json
 {
   "mcpServers": {
-    "bw-blind-proxy": {
+    "bw-mcp": {
       "command": "uv",
       "args": [
         "--directory",
-        "/absolute/path/to/bw-blind-proxy",
+        "/absolute/path/to/bw-mcp",
         "run",
-        "bw-blind-proxy"
+        "bw-mcp"
       ]
     }
   }

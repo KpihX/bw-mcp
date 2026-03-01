@@ -1,0 +1,12 @@
+{
+  "name": "bw-mcp",
+  "version": "1.2.0",
+  "description": "Sovereign IA-Blind Proxy for Bitwarden",
+  "mcpServers": {
+    "bw-mcp": {
+      "command": "/home/kpihx/.local/bin/bw-mcp",
+      "args": []
+    }
+  },
+  "contextFileName": "GEMINI.md"
+}

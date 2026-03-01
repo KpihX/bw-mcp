@@ -10,7 +10,7 @@ from .wal import WALManager
 from .models import TransactionStatus
 from .scrubber import deep_scrub_payload
 
-app = typer.Typer(help="BW-Blind-Proxy Management & Audit CLI")
+app = typer.Typer(help="BW-MCP Management & Audit CLI")
 console = Console()
 
 @app.command("logs", help="View the latest transaction logs in a beautifully formatted table.")

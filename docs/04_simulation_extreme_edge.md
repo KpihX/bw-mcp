@@ -1,6 +1,6 @@
 # Simulation Exhaustive : L’Extrême Frontière (Phase 4) 🌌
 
-Ce document illustre comment le BW-Blind-Proxy gère les opérations les plus spécialisées et rares de Bitwarden : la gestion de la Corbeille, le transfert vers les Organisations (Entreprise), la suppression de pièces jointes, et l'exigence de Reprompt du Master Password.
+Ce document illustre comment le BW-MCP gère les opérations les plus spécialisées et rares de Bitwarden : la gestion de la Corbeille, le transfert vers les Organisations (Entreprise), la suppression de pièces jointes, et l'exigence de Reprompt du Master Password.
 
 [ ⬅️ 03: PII Redaction ](03_simulation_pii_redaction.md) | [ 05: Destructive Firewall ➡️ ](05_simulation_destructive_firewall.md)
 

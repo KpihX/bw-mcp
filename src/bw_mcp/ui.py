@@ -10,7 +10,7 @@ class HITLManager:
     """
     
     @staticmethod
-    def ask_master_password(title: str = "BW-Blind-Proxy: Unlock Vault") -> bytearray:
+    def ask_master_password(title: str = "BW-MCP: Unlock Vault") -> bytearray:
         """
         Triggers a secure Zenity popup to ask for the master password.
         Returns a mutable bytearray to allow manual memory wiping by the caller.

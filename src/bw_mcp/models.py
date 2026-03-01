@@ -1,7 +1,7 @@
 from enum import StrEnum
 from typing import List, Optional, Any, Dict, Literal, Union, Annotated
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from bw_blind_proxy.config import REDACTED_POPULATED, REDACTED_EMPTY, MAX_BATCH_SIZE
+from bw_mcp.config import REDACTED_POPULATED, REDACTED_EMPTY, MAX_BATCH_SIZE
 
 # -----------------
 # ACTION ENUMERATIONS (CENTRALIZATION)

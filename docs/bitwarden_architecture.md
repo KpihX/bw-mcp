@@ -1,6 +1,6 @@
 # Bitwarden Vault Architecture Reference 🏗️
 
-This document is the result of an exhaustive extraction of the Bitwarden CLI (`bw get template`) schemas. It serves as the ultimate source of truth for planning how to refactor the **BW-Blind-Proxy** to cover 100% of the non-sensitive API.
+This document is the result of an exhaustive extraction of the Bitwarden CLI (`bw get template`) schemas. It serves as the ultimate source of truth for planning how to refactor the **BW-MCP** to cover 100% of the non-sensitive API.
 
 ---
 

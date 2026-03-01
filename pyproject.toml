@@ -1,5 +1,5 @@
 [project]
-name = "bw-blind-proxy"
+name = "bw-mcp"
 version = "1.2.0"
 description = "A sovereign MCP server acting as a security-hardened blind proxy between LLMs and the Bitwarden CLI. Zero Trust · Total Transparency · Total Blind."
 readme = "README.md"
@@ -17,8 +17,8 @@ dependencies = [
 ]
 
 [project.scripts]
-bw-blind-proxy = "bw_blind_proxy:main"
-bw-proxy = "bw_blind_proxy.cli:app"
+bw-mcp = "bw_mcp:main"
+bw-proxy = "bw_mcp.cli:app"
 
 [build-system]
 requires = ["uv_build>=0.10.3,<0.11.0"]

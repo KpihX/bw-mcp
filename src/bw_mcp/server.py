@@ -4,7 +4,7 @@ from mcp.server.fastmcp import FastMCP
 from typing import Dict, Any, List, Optional
 
 from .config import load_config, MAX_BATCH_SIZE, REDACTED_POPULATED
-from .subprocess_wrapper import SecureSubprocessWrapper, SecureBWError, _safe_error_message
+from .subprocess_wrapper import SecureSubprocessWrapper, SecureBWError, SecureProxyError, _safe_error_message
 from .models import BlindItem, BlindFolder, BlindOrganization, BlindOrganizationCollection, TransactionPayload
 from .transaction import TransactionManager
 from .logger import TransactionLogger
@@ -13,7 +13,7 @@ from .ui import HITLManager
 
 # Load configuration (cached automatically)
 config = load_config()
-SERVER_NAME = config.get("proxy", {}).get("name", "BW-Blind-Proxy")
+SERVER_NAME = config.get("proxy", {}).get("name", "BW-MCP")
 
 # Initialize Server with a system meta-prompt for immediate context & zero-latency alignment
 mcp = FastMCP(
@@ -227,7 +227,7 @@ if propose_vault_transaction.__doc__:
 @mcp.tool()
 def get_proxy_audit_context(limit: int = 5) -> str:
     """
-    Returns the current operational status of the BW-Blind-Proxy.
+    Returns the current operational status of the BW-MCP.
     Use this to check for 'Write-Ahead Log' (WAL) orphans and recent log history.
     
     Call this tool if you encounter a transaction failure or if you 
@@ -264,7 +264,7 @@ def inspect_transaction_log(tx_id: str = None, n: int = None) -> str:
     try:
         log_data = TransactionLogger.get_log_details(tx_id=tx_id, n=n)
         return json.dumps(log_data, indent=2)
-    except ValueError as e:
+    except SecureProxyError as e:
         return f"Error: {_safe_error_message(e)}"
     except Exception as e:
         return f"Unexpected Error reading log: {_safe_error_message(e)}"

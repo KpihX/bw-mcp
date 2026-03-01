@@ -1,10 +1,10 @@
 proxy:
   # The name of the server exposed by MCP
-  name: "BW-Blind-Proxy"
+  name: "BW-MCP"
 
   # The centralized directory where logs and WAL are stored.
   # Relative paths or ~ are supported.
-  state_directory: "~/.bw_blind_proxy"
+  state_directory: "~/.bw_mcp"
 
   # Maximum number of operations allowed in a single transaction batch.
   # Keeping batches small reduces the race-condition window with external Bitwarden clients.

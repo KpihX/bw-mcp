@@ -1,6 +1,6 @@
 import json
-from bw_blind_proxy.server import mcp, get_proxy_audit_context, inspect_transaction_log, sync_vault
-from bw_blind_proxy.config import MAX_BATCH_SIZE, REDACTED_POPULATED
+from bw_mcp.server import mcp, get_proxy_audit_context, inspect_transaction_log, sync_vault
+from bw_mcp.config import MAX_BATCH_SIZE, REDACTED_POPULATED
 
 def test_sync_vault():
     res = sync_vault()

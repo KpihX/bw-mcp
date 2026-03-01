@@ -1,6 +1,6 @@
 # Simulation Exhaustive : Types Avancés & Défense PII 🛡️
 
-Ce document présente comment le BW-Blind-Proxy gère l'édition des types sensibles (Identity, Card) et des champs personnalisés tout en bloquant toute fuite de secret.
+Ce document présente comment le BW-MCP gère l'édition des types sensibles (Identity, Card) et des champs personnalisés tout en bloquant toute fuite de secret.
 
 [ ⬅️ 02: Organization ](02_simulation_vault_organization.md) | [ 04: Extreme Edge ➡️ ](04_simulation_extreme_edge.md)
 

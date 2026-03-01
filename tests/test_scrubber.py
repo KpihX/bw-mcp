@@ -1,5 +1,5 @@
 import pytest
-from bw_blind_proxy.scrubber import deep_scrub_payload, PAYLOAD_TAG
+from bw_mcp.scrubber import deep_scrub_payload, PAYLOAD_TAG
 
 def test_scrubber_primitive_passthrough():
     assert deep_scrub_payload(None) is None

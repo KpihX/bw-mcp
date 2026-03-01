@@ -44,7 +44,7 @@ REDACTED_POPULATED = _config_cache.get("redaction", {}).get("populated_tag", "[R
 REDACTED_EMPTY = _config_cache.get("redaction", {}).get("empty_tag", "[REDACTED_BY_PROXY_EMPTY]")
 
 # Final path resolution for logging and WAL
-default_state_dir = "~/.bw_blind_proxy"
+default_state_dir = "~/.bw_mcp"
 proxy_config = _config_cache.get("proxy", {})
 STATE_DIR = os.path.expanduser(proxy_config.get("state_directory", default_state_dir))
 

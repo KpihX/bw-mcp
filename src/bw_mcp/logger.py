@@ -5,6 +5,7 @@ from typing import List, Dict, Any
 from .models import TransactionPayload, TransactionStatus
 from .config import STATE_DIR
 from .scrubber import deep_scrub_payload
+from .subprocess_wrapper import SecureProxyError
 
 LOG_DIR = os.path.join(STATE_DIR, "logs")
 
@@ -109,25 +110,25 @@ class TransactionLogger:
         If both are None, returns the absolute newest log.
         """
         if not os.path.exists(LOG_DIR):
-            raise ValueError("No logs directory found.")
+            raise SecureProxyError("No logs directory found.")
             
         all_files = [f for f in os.listdir(LOG_DIR) if f.endswith(".json")]
         if not all_files:
-            raise ValueError("No transaction logs exist yet.")
+            raise SecureProxyError("No transaction logs exist yet.")
             
         all_files.sort(reverse=True)
         
         target_file = None
         if n is not None:
             if n < 1 or n > len(all_files):
-                raise ValueError(f"Invalid index '{n}'. Only {len(all_files)} logs available.")
+                raise SecureProxyError(f"Invalid index '{n}'. Only {len(all_files)} logs available.")
             target_file = all_files[n - 1]
         elif tx_id is not None:
             matches = [f for f in all_files if tx_id in f]
             if not matches:
-                raise ValueError(f"No log found matching Transaction ID: {tx_id}")
+                raise SecureProxyError(f"No log found matching Transaction ID: {tx_id}")
             if len(matches) > 1:
-                raise ValueError(f"Multiple logs match '{tx_id}'. Please provide a more specific prefix.")
+                raise SecureProxyError(f"Multiple logs match '{tx_id}'. Please provide a more specific prefix.")
             target_file = matches[0]
         else:
             target_file = all_files[0]
