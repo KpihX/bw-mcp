@@ -34,7 +34,7 @@ We do not sell a dream. We document every architectural decision and **every lim
 | Limitation                          | Root cause                                     | Our mitigation                                                   |
 | :---------------------------------- | :--------------------------------------------- | :--------------------------------------------------------------- |
 | No atomic `COMMIT`                  | Bitwarden API has no transaction mode          | WAL + LIFO Rollback (Saga Pattern)                               |
-| Race condition window               | External clients can modify vault during batch | Batch size cap of 10 ops (configurable)                          |
+| Race condition window               | External clients can modify vault during batch | Batch size cap of 25 ops (configurable)                          |
 | Session timeout during long batches | `BW_SESSION` can expire server-side            | Short batches, WAL survives crash for auto-recovery on next boot |
 
 → **Full details:** [docs/LIMITATIONS.md](docs/LIMITATIONS.md)
@@ -620,7 +620,7 @@ Following the developer mandate of **Independent Autonomous Packages**, the conf
 proxy:
   name: "BW-MCP"
   state_directory: "~/.bw_mcp"
-  max_batch_size: 10
+  max_batch_size: 25
 
 redaction:
   populated_tag: "[REDACTED_BY_PROXY_POPULATED]"
@@ -709,18 +709,33 @@ The proxy features an underlying auditor capturing every structural modification
 uv run bw-proxy logs --n=5
 
 # View the FULL JSON details of a specific transaction
-# -- by transaction ID (or unique prefix):
-uv run bw-proxy log e4f12a
-# -- by recency index (1 = newest, 2 = second newest, etc.):
-uv run bw-proxy log --last 1
-# -- or just call it bare to get the most recent log:
 uv run bw-proxy log
 
 # Inspect the full Write-Ahead Log state (100% JSON transparency)
 uv run bw-proxy wal
 
-# Delete old logs, keeping only the N most recent ones to free up space
+# Delete old logs, keeping only the N most recent ones
 uv run bw-proxy purge --keep=10
+```
+
+### ⚙️ Daemon Lifecycle CLI (`bw-mcp`)
+
+The main entrypoint acts as a lightweight daemon controller similar to `systemd` or `nginx`.
+When run by an AI client without arguments, it defaults to `bw-mcp serve` (stdio mode).
+
+```bash
+# Check if the server is currently running (reads PID file)
+bw-mcp status
+
+# Stop a running server cleanly via SIGTERM
+bw-mcp stop
+
+# Restart the server (Useful after 'uv tool install --force' to load new bytecode)
+# The MCP client will automatically respawn it on the next query.
+bw-mcp restart
+
+# Print current version
+bw-mcp version
 ```
 
 ### 🔌 Adding to an MCP Client
@@ -777,7 +792,7 @@ If you use the `gemini-cli`, you can integrate `bw-mcp` natively to give your ag
 ```json
 {
   "name": "bw-mcp",
-  "version": "1.2.3",
+  "version": "1.3.0",
   "description": "Sovereign IA-Blind Proxy for Bitwarden",
   "mcpServers": {
     "bw-mcp": {
@@ -807,7 +822,7 @@ gemini extensions install .
 ```json
 {
   "name": "bw-mcp",
-  "version": "1.2.3",
+  "version": "1.3.0",
   "description": "Sovereign IA-Blind Proxy for Bitwarden",
   "mcpServers": {
     "bw-mcp": {

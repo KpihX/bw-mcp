@@ -2,6 +2,20 @@
 
 All notable changes to this project, from its inception to the current secure state.
 
+## [v1.3.0] - 2026-03-01: The Daemon Evolution & Batch Upgrade
+### ⚙️ Daemon Lifecycle Control
+- **Typer CLI Overhaul**: Refactored the core `bw-mcp` entry point (`__init__.py` -> `main.py`) from a bare `main()` into a fully-fledged Typer CLI with systemd-like daemon controls.
+- **PID File Management**: Created `daemon.py` to manage a stateful `~/.bw_mcp/bw-mcp.pid` tracking the live FastMCP stdio process.
+- **Lifecycle Commands**: Introduced new subcommands for manual or automated control without breaking the core MCP protocol:
+  - `bw-mcp serve` (Default backward-compatible entrypoint for Gemini/Claude/Cursor)
+  - `bw-mcp status` (Check PID heartbeat)
+  - `bw-mcp stop` (Send SIGTERM)
+  - `bw-mcp restart` (Cleanly kill the stale process so the MCP client auto-respawns the new binary)
+- **Extensive Daemon Tests**: Implemented comprehensive unit tests (`test_daemon.py`) verifying state-checking and SIGTERM mocking.
+
+### 📈 Scale Improvements
+- **Increased Batch Capacity**: Raised `max_batch_size` default limit in `config.yaml` from 10 to 25 operations to support heavier automated vault organization scripts without fragmentation.
+
 ## [v1.2.3] - 2026-03-01: UI Security & Pango Immunity
 ### 🔒 UI Hardening
 - **Pango Markup Escaping**: Implemented systematic XML/HTML escaping for all strings displayed in Zenity popups. This prevents UI crashes or blank dialogs when vault items or rationales contain special characters like `&`, `<`, or `>`.

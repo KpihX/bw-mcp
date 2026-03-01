@@ -114,11 +114,15 @@ class HITLManager:
         has_destructive = any(op.action in ["delete_item", "delete_folder"] for op in payload.operations)
         
         if has_destructive:
-            dialog_type = "--warning"
+            # dialog_type is always --question for Yes/No semantics.
+            # Destructive ops add --icon-name=dialog-warning to show a red icon.
+            # 1. Use GTK4-compatible 'foreground' attribute (deprecated 'color' silently breaks Pango in GTK4,
+            #    causing the entire text area to render blank).
+            # 2. Keep a plain-text emoji prefix OUTSIDE the span so that even if Pango skips the span,
+            #    the user still sees the ⚠️ RED ALERT heading.
             title = "⚠️ CRITICAL: Review Destructive Vault Transaction"
-            text_header = "<span color='red' size='x-large'><b>⚠️ WARNING: DESTRUCTIVE OPERATIONS DETECTED</b></span>\n\nThe AI Agent proposes these operations which include irreversible deletions:"
+            text_header = "⚠️ RED ALERT: DESTRUCTIVE OPERATIONS DETECTED\n<span foreground='red' size='large'><b>This action is IRREVERSIBLE. Read carefully before approving.</b></span>\n\nThe AI Agent proposes these operations which include irreversible deletions:"
         else:
-            dialog_type = "--question"
             title = "Review Proposed Vault Transaction"
             text_header = "The AI Agent proposes the following batch operations:"
 
@@ -126,24 +130,21 @@ class HITLManager:
         text = f"{text_header}\n\n<b>Operations:</b>\n{formatted_ops}\n\n<b>Rationale:</b> {html.escape(payload.rationale)}\n\nDo you explicitly approve these changes?"
         
         try:
-            # Zenity --warning doesn't always have a Cancel button by default, 
-            # but we can force question-like behavior for warnings, or just accept that OK continues. 
-            # In Linux, zenity --question with an icon is better for Yes/No with markup.
-            
-            cmd = [
-                "zenity", dialog_type,
-                f"--title={title}",
-                "--text", text,
-                "--width=700",
-                "--height=500"
-            ]
-            
-            # If we want a warning that asks Yes/No
+            # Always use --question for Yes/No semantics.
+            # Destructive operations add --icon-name=dialog-warning for a red icon.
+            # Non-destructive operations use the default info icon.
             if has_destructive:
-                # Combining warning icon with question dialog
                 cmd = [
                     "zenity", "--question",
                     "--icon-name=dialog-warning",
+                    f"--title={title}",
+                    "--text", text,
+                    "--width=700",
+                    "--height=500"
+                ]
+            else:
+                cmd = [
+                    "zenity", "--question",
                     f"--title={title}",
                     "--text", text,
                     "--width=700",
