@@ -270,13 +270,14 @@ class TransactionManager:
                                     f"Original error from CLI: {_safe_error_message(e)}")
 
         for op in operations:
-            action_type = type(op.action)
+            is_item_action = any(op.action == a for a in ItemAction) or any(op.action == a for a in EditAction)
+            is_folder_action = any(op.action == a for a in FolderAction)
             
             # 1. Validate target_id (the main entity being manipulated)
             if getattr(op, "target_id", None):
-                if action_type in (ItemAction, EditAction):
+                if is_item_action:
                     resolve_and_validate(op.target_id, "item")
-                elif action_type is FolderAction:
+                elif is_folder_action:
                     if op.action != FolderAction.CREATE:  # Special case: create folder has no target_id yet
                         resolve_and_validate(op.target_id, "folder")
             
