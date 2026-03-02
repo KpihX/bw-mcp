@@ -2,6 +2,12 @@
 
 All notable changes to this project, from its inception to the current secure state.
 
+## [v1.5.1] - 2026-03-02: UI Transparency Hotfix (Zero-Trust Audit)
+### 🔒 Security / UI
+- **Patched URI Blindspot**: Removed the "pretty URI" formatter in `ui.py` that was silently stripping match strategy from Bitwarden URIs (e.g., `match=5 → Regex`). Zenity now displays the full raw list payload (`str(v)`) with zero reformatting.
+- **Config-driven Redaction Check**: Replaced hardcoded `"[REDACTED"` substring check with a strict equality check against `REDACTED_POPULATED` and `REDACTED_EMPTY` from `config.py`. Single Source of Truth restored.
+- **100% Transparent `_format_operation`**: Every field the LLM sends — URIs with match strategies, identity fields, card expiry, custom field values — is now shown verbatim to the human operator in Zenity before approval.
+
 ## [v1.5.0] - 2026-03-02: Native Schema Templates (Resources & Tools)
 ### 🧠 AI Contextualization
 - **Pydantic Driven Templates**: Introduced `TemplateType` (StrEnum) in `models.py` to firmly structure the Bitwarden template types exposed to the LLM context.
