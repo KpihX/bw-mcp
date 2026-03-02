@@ -2,6 +2,23 @@
 
 All notable changes to this project, from its inception to the current secure state.
 
+## [v1.6.0] - 2026-03-02: Blind Secret Comparator (AI-Blind Audit Primitive)
+### 🆕 Features
+- **`compare_secrets_batch` Tool**: New MCP tool allowing the LLM to compare secret fields (passwords, TOTPs, SSNs, card numbers, custom hidden fields) between vault items without EVER seeing the values. Returns only `MATCH` / `MISMATCH`.
+- **`SecretFieldTarget` StrEnum**: Strict Pydantic-enforced whitelist of auditable secret paths (`login.password`, `login.totp`, `card.number`, `card.code`, `identity.ssn`, `identity.passportNumber`, `identity.licenseNumber`, `fields.VALUE`).
+- **`BatchComparePayload` Model**: Typed batch payload supporting up to `MAX_BATCH_SIZE` comparisons per call, with Pydantic validators.
+- **`review_comparisons` UI**: New Zenity dialog for human-in-the-loop approval of audit requests, with full item name + UUID resolution.
+- **Isolated Subprocess Execution**: Secret comparison runs in an ephemeral child Python process — secrets never enter the proxy's RAM.
+
+### 🔒 Security Audit Fixes
+- **`import sys` missing**: Fixed crash in `subprocess_wrapper.py` where `sys.executable` was used without importing `sys`.
+- **Double Master Password popup**: `compare_secrets_batch` was calling `get_vault_map()` internally, triggering two Zenity password prompts. Refactored to a single unlock flow.
+- **`_parse_id_map` non-existent**: Replaced phantom method call with inline vault parsing.
+- **`log_operation` non-existent**: Replaced with proper `log_transaction` call using synthetic `TransactionPayload`.
+- **UUID Validation**: Added `_UUID_RE` validation on `item_id_a` and `item_id_b` before subprocess dispatch to prevent malformed inputs from reaching `bw` CLI.
+- **UUID disambiguation in UI**: `resolve()` now always shows `'Name' (uuid)` to prevent confusion with duplicate item names.
+- **Config-driven audit tags**: `MATCH` / `MISMATCH` verdicts loaded from `config.yaml → audit.match_tag / audit.mismatch_tag`.
+
 ## [v1.5.1] - 2026-03-02: UI Transparency Hotfix (Zero-Trust Audit)
 ### 🔒 Security / UI
 - **Patched URI Blindspot**: Removed the "pretty URI" formatter in `ui.py` that was silently stripping match strategy from Bitwarden URIs (e.g., `match=5 → Regex`). Zenity now displays the full raw list payload (`str(v)`) with zero reformatting.

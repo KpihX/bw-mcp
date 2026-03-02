@@ -2,6 +2,7 @@ import subprocess
 import os
 import json
 import re
+import sys
 from typing import List, Optional
 from mcp.shared.exceptions import McpError
 from .config import load_config, PAYLOAD_TAG, BW_PASSWORD_ENV, BW_SESSION_ENV
@@ -228,3 +229,89 @@ class SecureSubprocessWrapper:
             return result.stdout.strip()
         except Exception as e:
             raise SecureBWError(f"Subprocess error: {str(e)}")
+
+    @staticmethod
+    def audit_compare_secrets(
+        item_id_a: str, field_a: str, name_a: str | None,
+        item_id_b: str, field_b: str, name_b: str | None,
+        session_key: bytearray
+    ) -> bool:
+        """
+        Executes an isolated, ephemeral Python subprocess to fetch, 
+        parse, and compare two secret fields without EVER loading 
+        the secrets into the main proxy's memory space.
+        Returns True if they match exactly.
+        """
+        # SECURITY: Validate UUIDs before passing to subprocess to prevent
+        # malformed inputs from reaching the Bitwarden CLI.
+        for uid, label in [(item_id_a, "item_id_a"), (item_id_b, "item_id_b")]:
+            if not _UUID_RE.match(uid):
+                raise SecureBWError(f"Invalid UUID for {label}: '{uid}'. Expected UUID v4 format.")
+        
+        env = os.environ.copy()
+        # NOTE: BW_SESSION is injected here. The child Python process inherits
+        # this env, and its own `bw get item` subprocess calls will also inherit
+        # it transitively. This is the intended secure propagation chain.
+        env[BW_SESSION_ENV] = session_key.decode('utf-8')
+        
+        script = """
+import os, json, subprocess, sys
+
+def get_bw_item(uuid):
+    res = subprocess.run(['bw', 'get', 'item', uuid], capture_output=True, text=True)
+    if res.returncode != 0:
+        sys.exit(2)
+    return json.loads(res.stdout)
+
+def extract(item, field_path, c_name):
+    if field_path == "fields.VALUE":
+        for f in item.get('fields', []):
+            if f.get('name') == c_name:
+                return f.get('value')
+        return None
+    keys = field_path.split('.')
+    val = item
+    for k in keys:
+        if isinstance(val, dict):
+            val = val.get(k)
+        else:
+            return None
+    return val
+
+try:
+    item_a = get_bw_item(sys.argv[1])
+    val_a = extract(item_a, sys.argv[2], sys.argv[3] if sys.argv[3] != '' else None)
+    
+    item_b = get_bw_item(sys.argv[4])
+    val_b = extract(item_b, sys.argv[5], sys.argv[6] if sys.argv[6] != '' else None)
+    
+    if val_a is not None and val_a != "" and val_a == val_b:
+        sys.exit(0)
+    else:
+        sys.exit(1)
+except Exception:
+    sys.exit(3)
+"""
+        cmd = [
+            sys.executable, "-c", script, 
+            item_id_a, field_a, name_a or "", 
+            item_id_b, field_b, name_b or ""
+        ]
+        
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                env=env,
+                check=False
+            )
+            if result.returncode == 0:
+                return True
+            elif result.returncode == 1:
+                return False
+            else:
+                raise SecureBWError(f"Isolated blind comparison subprocess failed (code {result.returncode}).")
+        finally:
+            if BW_SESSION_ENV in env:
+                env[BW_SESSION_ENV] = "DEADBEEF" * 20
+                del env[BW_SESSION_ENV]

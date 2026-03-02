@@ -204,3 +204,38 @@ class HITLManager:
             
         except FileNotFoundError:
             raise RuntimeError("Zenity is not installed.")
+
+    @staticmethod
+    def review_comparisons(payload: Any, id_to_name: dict = None) -> bool:
+        """
+        Displays a Zenity dialog with the list of blind comparisons proposed by the agent.
+        Since comparisons are read-only audits, this always uses a standard info dialog.
+        """
+        def format_req(req, idx):
+            def resolve(uuid: str) -> str:
+                name = (id_to_name or {}).get(uuid)
+                return f"'{html.escape(name)}' ({uuid})" if name else f"({uuid})"
+            a_field = f"'{html.escape(req.custom_name_a)}'" if req.custom_name_a else req.field_a
+            b_field = f"'{html.escape(req.custom_name_b)}'" if req.custom_name_b else req.field_b
+            return f"{idx}. ⚖️ COMPARE SECRET {resolve(req.item_id_a)} [{a_field}] == {resolve(req.item_id_b)} [{b_field}]"
+
+        formatted_ops = "\n".join(
+            format_req(req, i) for i, req in enumerate(payload.comparisons, 1)
+        )
+        
+        title = "Review Security Audit (Secret Comparison)"
+        text_header = "The AI Agent requests to perform blind secret comparisons on your vault."
+        text = f"{text_header}\n\n<b>Comparisons (Read-Only):</b>\n{formatted_ops}\n\n<b>Rationale:</b> {html.escape(payload.rationale)}\n\nDo you explicitly grant permission to audit these fields?"
+        
+        try:
+            cmd = [
+                "zenity", "--question",
+                f"--title={title}",
+                "--text", text,
+                "--width=700",
+                "--height=500"
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            return result.returncode == 0
+        except FileNotFoundError:
+            raise RuntimeError("Zenity is not installed.")

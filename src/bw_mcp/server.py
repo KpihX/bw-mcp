@@ -3,9 +3,9 @@ import json
 from mcp.server.fastmcp import FastMCP
 from typing import Dict, Any, List, Optional
 
-from .config import load_config, MAX_BATCH_SIZE, REDACTED_POPULATED
+from .config import load_config, MAX_BATCH_SIZE, REDACTED_POPULATED, AUDIT_MATCH_TAG, AUDIT_MISMATCH_TAG
 from .subprocess_wrapper import SecureSubprocessWrapper, SecureBWError, SecureProxyError, _safe_error_message
-from .models import BlindItem, BlindFolder, BlindOrganization, BlindOrganizationCollection, TransactionPayload, TemplateType
+from .models import BlindItem, BlindFolder, BlindOrganization, BlindOrganizationCollection, TransactionPayload, TemplateType, BatchComparePayload, TransactionStatus
 from .transaction import TransactionManager
 from .logger import TransactionLogger
 from .wal import WALManager
@@ -249,6 +249,93 @@ def inspect_transaction_log(tx_id: str = None, n: int = None) -> str:
         return f"Error: {_safe_error_message(e)}"
     except Exception as e:
         return f"Unexpected Error reading log: {_safe_error_message(e)}"
+
+@mcp.tool()
+def compare_secrets_batch(payload: BatchComparePayload) -> str:
+    """
+    BLIND AUDIT PRIMITIVE: Safely compares secret fields (passwords, TOTPs, SSNs) 
+    between two vault items without EVER exposing the text to you (the LLM).
+    Useful for deduplication audits or confirming successful migrations.
+    Returns highly structured JSON with matching statuses.
+    """
+    master_password = None
+    session_key = None
+    try:
+        # 1. Single unlock — avoids the double-popup anti-pattern
+        master_password = HITLManager.ask_master_password(title="BW-MCP: Unlock Vault for Secret Audit")
+        session_key = SecureSubprocessWrapper.unlock_vault(master_password)
+        
+        # 2. Build id_to_name map inline from vault data (items + folders)
+        id_to_name = {}
+        try:
+            raw_items = SecureSubprocessWrapper.execute_json(["list", "items"], session_key)
+            for item in raw_items:
+                if item.get("id") and item.get("name"):
+                    id_to_name[item["id"]] = item["name"]
+            raw_folders = SecureSubprocessWrapper.execute_json(["list", "folders"], session_key)
+            for folder in raw_folders:
+                if folder.get("id") and folder.get("name"):
+                    id_to_name[folder["id"]] = folder["name"]
+        except Exception:
+            pass  # Graceful degradation: UUIDs will be shown raw in Zenity
+        
+        # 3. Ask human explicitly for permission to perform the audit
+        if not HITLManager.review_comparisons(payload, id_to_name):
+            return json.dumps({"status": "ABORTED", "message": "Audit cancelled by user."})
+        
+        # 4. Execute comparisons
+        results = []
+        for i, req in enumerate(payload.comparisons, 1):
+            try:
+                is_match = SecureSubprocessWrapper.audit_compare_secrets(
+                    req.item_id_a, req.field_a, req.custom_name_a,
+                    req.item_id_b, req.field_b, req.custom_name_b,
+                    session_key
+                )
+                verdict = AUDIT_MATCH_TAG if is_match else AUDIT_MISMATCH_TAG
+                results.append({
+                    "index": i,
+                    "item_a": req.item_id_a,
+                    "field_a": req.field_a,
+                    "item_b": req.item_id_b,
+                    "field_b": req.field_b,
+                    "verdict": verdict
+                })
+            except Exception as e:
+                results.append({
+                    "index": i,
+                    "error": _safe_error_message(e)
+                })
+
+        # 5. Log the audit (read-only, no WAL needed)
+        # Build a synthetic TransactionPayload for the logger's interface
+        mock_payload = TransactionPayload(
+            rationale=payload.rationale,
+            operations=[]
+        )
+        unique_items = len({r.item_id_a for r in payload.comparisons} | {r.item_id_b for r in payload.comparisons})
+        TransactionLogger.log_transaction(
+            transaction_id=f"audit-{len(payload.comparisons)}x{unique_items}",
+            payload=mock_payload,
+            status=TransactionStatus.SUCCESS,
+            executed_ops=[f"Blind comparison #{r['index']}: {r.get('verdict', 'ERROR')}" for r in results]
+        )
+        
+        return json.dumps({"status": "SUCCESS", "results": results}, indent=2)
+
+    except SecureBWError as e:
+        return f"Bitwarden CLI Error during audit: {str(e)}"
+    except Exception as e:
+        return f"Proxy Error during audit: {_safe_error_message(e)}"
+    finally:
+        if session_key is not None:
+            for i in range(len(session_key)):
+                session_key[i] = 0
+            del session_key
+        if master_password is not None:
+            for i in range(len(master_password)):
+                master_password[i] = 0
+            del master_password
 
 def _fetch_template(template_type: str) -> str:
     """

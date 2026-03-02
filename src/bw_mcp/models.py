@@ -42,6 +42,17 @@ class EditAction(StrEnum):
     IDENTITY = "edit_item_identity"
     CUSTOM_FIELD = "upsert_custom_field"
 
+class SecretFieldTarget(StrEnum):
+    """Target keys for secret value comparison (AI-Blind Audit)."""
+    LOGIN_PASSWORD = "login.password"
+    LOGIN_TOTP = "login.totp"
+    CARD_NUMBER = "card.number"
+    CARD_CVV = "card.code"
+    IDENTITY_SSN = "identity.ssn"
+    IDENTITY_PASSPORT = "identity.passportNumber"
+    IDENTITY_LICENSE = "identity.licenseNumber"
+    CUSTOM_FIELD = "fields.VALUE" # Needs custom_name to resolve the target
+
 class TransactionStatus(StrEnum):
     SUCCESS = "SUCCESS"                            # Batch finished perfectly
     ROLLBACK_TRIGGERED = "ROLLBACK_TRIGGERED"      # Error caught, starting reversal
@@ -442,5 +453,34 @@ class TransactionPayload(BaseModel):
                 f"but the proxy enforces a maximum of {MAX_BATCH_SIZE} operations per batch "
                 f"(configured via proxy.max_batch_size in config.yaml). "
                 f"Split your request into smaller batches of at most {MAX_BATCH_SIZE} operations each."
+            )
+        return self
+
+class CompareSecretRequest(BaseModel):
+    """Represents a single blind comparison request between two item secrets."""
+    item_id_a: str = Field(..., description="UUID of the first item")
+    field_a: SecretFieldTarget
+    custom_name_a: Optional[str] = Field(default=None, description="If field_a is CUSTOM_FIELD, specify the exact name of the hidden custom field here.")
+    
+    item_id_b: str = Field(..., description="UUID of the second item")
+    field_b: SecretFieldTarget
+    custom_name_b: Optional[str] = Field(default=None, description="If field_b is CUSTOM_FIELD, specify the exact name of the hidden custom field here.")
+
+class BatchComparePayload(BaseModel):
+    """Payload for submitting multiple blind comparisons in a single batch."""
+    rationale: str = Field(..., description="Explain to the host human why you need to perform these blind checks.")
+    comparisons: List[CompareSecretRequest] = Field(
+        ...,
+        min_length=1, 
+        description="List of secret comparisons to perform blindly without ever revealing the actual text."
+    )
+
+    @model_validator(mode='after')
+    def enforce_max_batch_size(self) -> 'BatchComparePayload':
+        """Enforce the upper bound on batch size for audit queries."""
+        if len(self.comparisons) > MAX_BATCH_SIZE:
+            raise ValueError(
+                f"BATCH TOO LARGE: You submitted {len(self.comparisons)} comparisons "
+                f"(maximum allowed: {MAX_BATCH_SIZE}). Please split your request."
             )
         return self

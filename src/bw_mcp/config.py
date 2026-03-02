@@ -109,3 +109,11 @@ _wal_crypto_config = _config_cache.get("wal_crypto", {})
 WAL_SALT_LENGTH: int = _wal_crypto_config.get("salt_length", 16)
 WAL_KEY_LENGTH: int = _wal_crypto_config.get("key_length", 32)
 WAL_PBKDF2_ITERATIONS: int = _wal_crypto_config.get("iterations", 480_000)
+
+# -----------------
+# AUDIT CONSTANTS
+# -----------------
+_audit_config = _config_cache.get("audit", {})
+
+AUDIT_MATCH_TAG: str = _audit_config.get("match_tag", "MATCH")
+AUDIT_MISMATCH_TAG: str = _audit_config.get("mismatch_tag", "MISMATCH")
