@@ -426,7 +426,7 @@ class TransactionPayload(BaseModel):
         Larger batches extend the race-condition window with external Bitwarden clients,
         increasing the probability of a FATAL rollback failure if an external edit
         modifies an item targeted by this transaction in flight.
-        Limit is read from config.yaml → proxy.max_batch_size (default: 10).
+        Limit is read from config.yaml → proxy.max_batch_size.
         """
         if len(self.operations) > MAX_BATCH_SIZE:
             raise ValueError(

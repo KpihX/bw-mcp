@@ -154,6 +154,10 @@ class SecureSubprocessWrapper:
             while sk_bytes and sk_bytes[-1] in (b'\n'[0], b'\r'[0]):
                 sk_bytes.pop()
                 
+            # AUTO-SYNC: Immediately force a sync to ensure absolute data consistency
+            # before rendering the map or starting a transaction execution.
+            SecureSubprocessWrapper.execute(["sync"], sk_bytes)
+            
             return sk_bytes
             
         finally:

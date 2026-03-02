@@ -26,6 +26,7 @@ You are a Bitwarden Agent operating through a SECURE BLIND PROXY (Zero Trust).
 3. ACID ENGINE: Every transaction is Atomic (All-or-Nothing) and backed by a Write-Ahead Log (WAL).
 4. HUMAN-IN-THE-LOOP: provide a clear 'rationale' for every proposal to convince the human to approve.
 5. SELF-AUDIT: If a transaction crashes, use 'get_proxy_audit_context' and 'inspect_transaction_log' to diagnose and propose manual recovery steps.
+6. AUTO-SYNC: The proxy automatically and securely forces a 'bw sync' before ANY transaction or vault map retrieval to guarantee 100% data integrity. You never need to call sync yourself.
 """
 )
 
@@ -136,20 +137,6 @@ def get_vault_map(
             for i in range(len(master_password)):
                 master_password[i] = 0
             del master_password
-
-@mcp.tool()
-def sync_vault() -> str:
-    """
-    Forces the Bitwarden CLI to synchronize its local encrypted cache with the server.
-    Call this if you suspect the vault map is outdated or after a large external import.
-    This does NOT require the Master Password.
-    """
-    try:
-        SecureSubprocessWrapper.execute_raw(["sync"])
-        return "Vault successfully synchronized with the server."
-    except Exception as e:
-        return f"Sync failed: {str(e)}"
-
 
 @mcp.tool()
 def propose_vault_transaction(rationale: str, operations: List[Dict[str, Any]]) -> str:

@@ -153,7 +153,6 @@ Permissions: chmod 600
 | :-------------------------------------------- | :---------------- | :--------------------------------------------------------- | :----- |
 | `get_vault_map` (success)                     | Vault structure   | `BlindItem`/`BlindLogin` Pydantic redaction                | ✅      |
 | `get_vault_map` (failure)                     | Error message     | `_safe_error_message(e)`                                   | ✅      |
-| `sync_vault` (failure)                        | Error message     | `SecureBWError` (pre-sanitized)                            | ✅      |
 | `propose_vault_transaction` (validation fail) | Error message     | `_safe_error_message(e)` strips Pydantic values            | ✅      |
 | `propose_vault_transaction` (execution fail)  | Error + failed_op | `_safe_error_message(e)` + `deep_scrub_payload(failed_op)` | ✅      |
 | `propose_vault_transaction` (rollback trace)  | Command history   | `_sanitize_args_for_log` (whitelist redaction)             | ✅      |

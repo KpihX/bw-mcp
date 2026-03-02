@@ -1,10 +1,6 @@
 import json
-from bw_mcp.server import mcp, get_proxy_audit_context, inspect_transaction_log, sync_vault
+from bw_mcp.server import mcp, get_proxy_audit_context, inspect_transaction_log
 from bw_mcp.config import MAX_BATCH_SIZE, REDACTED_POPULATED
-
-def test_sync_vault():
-    res = sync_vault()
-    assert "successfully synchronized" in res or "Sync failed" in res
 
 def test_mcp_meta_prompt_instructions():
     # Verify that the core security rules are presence in the server instructions
