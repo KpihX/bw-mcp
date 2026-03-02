@@ -34,6 +34,41 @@ def load_config(config_path=CONFIG_PATH, **overrides) -> dict:
         
     return deep_update(config, overrides)
 
+def update_config(new_values: dict, config_path=CONFIG_PATH):
+    """
+    Updates the configuration file with new values.
+    Uses a clean load (no cache) to ensure we don't overwrite concurrent manual edits
+    with old cached state.
+    """
+    # 1. Load current raw data from disk
+    if config_path.exists():
+        with open(config_path, 'r') as f:
+            try:
+                data = yaml.safe_load(f) or {}
+            except yaml.YAMLError:
+                data = {}
+    else:
+        data = {}
+
+    # 2. Recursive update helper
+    def deep_update(d, u):
+        for k, v in u.items():
+            if isinstance(v, dict):
+                d[k] = deep_update(d.get(k, {}), v)
+            else:
+                d[k] = v
+        return d
+
+    # 3. Apply updates
+    updated_data = deep_update(data, new_values)
+
+    # 4. Save back to disk
+    with open(config_path, 'w') as f:
+        yaml.dump(updated_data, f, default_flow_style=False, sort_keys=False)
+
+    # 5. VERY IMPORTANT: Clear the lru_cache so the next load_config() sees the change
+    load_config.cache_clear()
+
 # -----------------
 # GLOBAL TYPED CONSTANTS
 # -----------------

@@ -9,7 +9,7 @@ Assistant sends a `propose_vault_transaction` with a full batch of operations.
 - **Rationale:** `"Migrating legacy project credentials to the archived folder and purging expired entries."`
 
 ## 🛡️ T+2s: WAL Initialization
-- **Consistency (C):** Pydantic validates the 10 ops against strict Enums. `extra="forbid"` ensures no secret field was sneaked in.
+- **Consistency (C):** Pydantic validates the ops against strict Enums. `extra="forbid"` ensures no secret field was sneaked in.
 - **Durability (D):** The proxy writes an empty WAL immediately: `write_wal(tx_id, [], master_password)`. The WAL is **AES-encrypted at rest** using a Fernet key derived from the Master Password via PBKDF2 (480k iterations) with a fresh 16-byte random salt.
 - After each successful op, a rollback command is appended and the WAL is **re-encrypted** with a new salt: `write_wal(tx_id, [rb_1], master_password)`.
 - **This is the point of no return for safety.**

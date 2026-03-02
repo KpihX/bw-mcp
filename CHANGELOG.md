@@ -2,6 +2,12 @@
 
 All notable changes to this project, from its inception to the current secure state.
 
+## [v1.4.2] - 2026-03-02: CLI Configuration Management
+### ⚙️ Proxy Control
+- **Dynamic Configuration**: Introduced `bw-proxy config` command to view and programmatically update the proxy's `config.yaml` from the CLI.
+- **Batch Size adjustment**: Added `-m / --max-batch-size` option to allow users to tune the ACID engine's risk window without manual YAML editing. Includes integer validation (>= 1).
+- **Atomic Config Write**: Implemented `update_config` with clean disk-load and `load_config.cache_clear()` to prevent race conditions during configuration updates.
+
 ## [v1.4.0] - 2026-03-02: Zero-Trust Auto-Sync Architecture
 ### 🔄 Silent Synchronization 
 - **Architectural Shift**: Removed the `sync_vault` MCP tool. Instead, the proxy now enforces a strict `bw sync` operation securely under-the-hood within `SecureSubprocessWrapper.unlock_vault()` immediately after decrypting the session key.

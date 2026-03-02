@@ -10,6 +10,7 @@ from .wal import WALManager
 from .models import TransactionStatus
 from .scrubber import deep_scrub_payload
 from .subprocess_wrapper import SecureProxyError
+from .config import load_config, update_config
 
 app = typer.Typer(help="BW-MCP Management & Audit CLI")
 log_app = typer.Typer(help="Manage and view transaction logs")
@@ -169,6 +170,24 @@ def wal_delete():
     else:
         console.print("[green]Success: WAL is already clean. Nothing to delete.[/green]")
 
+@app.command("config")
+def config_cmd(
+    max_batch_size: int = typer.Option(None, "-m", "--max-batch-size", help="Set the maximum number of operations allowed in a single transaction batch.")
+):
+    """View or update proxy configuration."""
+    if max_batch_size is not None:
+        if max_batch_size < 1:
+            console.print("[red]Error: max-batch-size must be a positive integer (>= 1).[/red]")
+            raise typer.Exit(1)
+        
+        update_config({"proxy": {"max_batch_size": max_batch_size}})
+        console.print(f"[green]Success: Configuration updated. MAX_BATCH_SIZE is now {max_batch_size}.[/green]")
+    else:
+        # View mode
+        conf = load_config()
+        console.print("[cyan bold]Current BW-MCP Configuration:[/cyan bold]")
+        # Hide internal paths for cleaner output if desired, but here we show everything
+        console.print(JSON(json.dumps(conf)))
 
 if __name__ == "__main__":
     app()

@@ -1,35 +1,15 @@
 proxy:
-  # The name of the server exposed by MCP
-  name: "BW-MCP"
-
-  # The centralized directory where logs and WAL are stored.
-  # Relative paths or ~ are supported.
-  state_directory: "~/.bw_mcp"
-
-  # Maximum number of operations allowed in a single transaction batch.
-  # Keeping batches small reduces the race-condition window with external Bitwarden clients.
-  # Risk: Each extra operation extends the window during which an external edit can cause a FATAL rollback failure.
+  name: BW-MCP
+  state_directory: ~/.bw_mcp
   max_batch_size: 25
-
 redaction:
-  # The tags used by the proxy to explicitly inform the AI about secret statuses
-  populated_tag: "[REDACTED_BY_PROXY_POPULATED]"
-  empty_tag: "[REDACTED_BY_PROXY_EMPTY]"
-
+  populated_tag: '[REDACTED_BY_PROXY_POPULATED]'
+  empty_tag: '[REDACTED_BY_PROXY_EMPTY]'
 security:
-  # Placeholder used in error logs and LLM messages to mask opaque CLI payloads
-  # (base64 JSON, raw JSON, passwords). Changing this value here updates ALL usages.
-  payload_tag: "[PAYLOAD]"
-
-  # Bitwarden environment variable names used to inject credentials into subprocesses.
-  # Centralizing them here prevents typos and eases auditing.
-  bw_password_env: "BW_PASSWORD"
-  bw_session_env: "BW_SESSION"
-
+  payload_tag: '[PAYLOAD]'
+  bw_password_env: BW_PASSWORD
+  bw_session_env: BW_SESSION
 wal_crypto:
-  # The length of the random salt generated for each Write-Ahead Log file (bytes)
   salt_length: 16
-  # The length of the AES key derived for encryption (bytes)
   key_length: 32
-  # The number of PBKDF2 iterations to derive the key from the Master Password
   iterations: 480000
