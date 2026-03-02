@@ -2,6 +2,12 @@
 
 All notable changes to this project, from its inception to the current secure state.
 
+## [v1.5.0] - 2026-03-02: Native Schema Templates (Resources & Tools)
+### 🧠 AI Contextualization
+- **Pydantic Driven Templates**: Introduced `TemplateType` (StrEnum) in `models.py` to firmly structure the Bitwarden template types exposed to the LLM context.
+- **`get_bitwarden_template` Tool**: Added a native MCP tool for the AI to securely fetch JSON schemas of Bitwarden entities (login, card, identity, etc.), automatically scrubbed of sensitive fields by the proxy.
+- **Dynamic Resources**: Exposed `bw://templates/{template_type}` as MCP resources for host applications, allowing human operators to inject clean Bitwarden schemas directly into the prompt without a tool execution round-trip.
+
 ## [v1.4.3] - 2026-03-02: Structured CLI Configuration & Versioning
 ### ⚙️ Proxy Control
 - **Refactored Config CLI**: Split `bw-proxy config` into explicit `get` and `update` subcommands for a more standard CLI experience.

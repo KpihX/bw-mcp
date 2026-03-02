@@ -63,7 +63,7 @@ OUR GUARD: Pydantic rejects ANY batch containing delete_attachment alongside
 
 
 The transparency of this proxy is its greatest strength. Follow the **[Visual Simulation Path](docs/01_simulation_core_protocol.md)** to see every byte in motion.
-- [CHANGELOG.md](CHANGELOG.md): The historical evolution from v1.0.0 (Foundation) to v1.4.3 (Structured CLI Configuration).
+- [CHANGELOG.md](CHANGELOG.md): The historical evolution from v1.0.0 (Foundation) to v1.5.0 (Native Schema Templates).
 
 ### 🎥 The Zero-Trust Interactive Path
 If you want to understand the codebase, read the documentation in this specific order:
@@ -804,7 +804,7 @@ If you use the `gemini-cli`, you can integrate `bw-mcp` natively to give your ag
 ```json
 {
   "name": "bw-mcp",
-  "version": "1.4.3",
+  "version": "1.5.0",
   "description": "Sovereign IA-Blind Proxy for Bitwarden",
   "mcpServers": {
     "bw-mcp": {
@@ -834,7 +834,7 @@ gemini extensions install .
 ```json
 {
   "name": "bw-mcp",
-  "version": "1.4.3",
+  "version": "1.5.0",
   "description": "Sovereign IA-Blind Proxy for Bitwarden",
   "mcpServers": {
     "bw-mcp": {

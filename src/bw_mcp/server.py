@@ -5,11 +5,13 @@ from typing import Dict, Any, List, Optional
 
 from .config import load_config, MAX_BATCH_SIZE, REDACTED_POPULATED
 from .subprocess_wrapper import SecureSubprocessWrapper, SecureBWError, SecureProxyError, _safe_error_message
-from .models import BlindItem, BlindFolder, BlindOrganization, BlindOrganizationCollection, TransactionPayload
+from .models import BlindItem, BlindFolder, BlindOrganization, BlindOrganizationCollection, TransactionPayload, TemplateType
 from .transaction import TransactionManager
 from .logger import TransactionLogger
 from .wal import WALManager
 from .ui import HITLManager
+from .ui import HITLManager
+from .scrubber import deep_scrub_payload
 
 # Load configuration (cached automatically)
 config = load_config()
@@ -248,6 +250,57 @@ def inspect_transaction_log(tx_id: str = None, n: int = None) -> str:
         return f"Error: {_safe_error_message(e)}"
     except Exception as e:
         return f"Unexpected Error reading log: {_safe_error_message(e)}"
+
+def _fetch_bw_template(template_type: str) -> str:
+    # Ensure it's a valid enum value if passed as generic string from a Resource URI
+    try:
+        valid_type = TemplateType(template_type)
+    except ValueError:
+        valid_types = [e.value for e in TemplateType]
+        return f"Error: Invalid template type '{template_type}'. Must be one of: {', '.join(valid_types)}"
+
+    master_password = HITLManager.get_master_password(f"Enter Master Password to fetch {valid_type.value} schema")
+    if not master_password:
+        return "Error: User cancelled authentication. Cannot fetch template."
+
+    try:
+        session_key = SecureSubprocessWrapper.unlock_vault(master_password)
+        template_data = SecureSubprocessWrapper.execute_json(["get", "template", valid_type.value], session_key)
+        safe_data = deep_scrub_payload(template_data)
+        
+        return json.dumps({
+            "_metadata": {
+                "source": f"bw get template {valid_type.value}",
+                "note": "Secret fields have been proactively redacted by BW-MCP to maintain AI-Blindness. Empty fields remain empty."
+            },
+            "template": safe_data
+        }, indent=2)
+    except SecureBWError as e:
+        return f"Bitwarden CLI Error: {str(e)}"
+    except Exception as e:
+        return f"Proxy Error: {_safe_error_message(e)}"
+    finally:
+        if 'session_key' in locals():
+            for i in range(len(session_key)):
+                session_key[i] = 0
+            del session_key
+        if 'master_password' in locals():
+            for i in range(len(master_password)):
+                master_password[i] = 0
+            del master_password
+
+@mcp.tool()
+def get_bitwarden_template(template_type: TemplateType) -> str:
+    """
+    Retrieves the pure JSON schema template for a Bitwarden entity type.
+    Crucial for autonomous agents needing to understand valid fields before creating/editing items.
+    """
+    return _fetch_bw_template(template_type.value)
+
+@mcp.resource("bw://templates/{template_type}")
+def template_resource(template_type: str) -> str:
+    """Read a Bitwarden entity template schema (e.g. bw://templates/item.login)"""
+    return _fetch_bw_template(template_type)
 
 def main():
     """Entry point for the script."""

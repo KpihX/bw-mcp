@@ -18,6 +18,14 @@ class ItemAction(StrEnum):
     TOGGLE_REPROMPT = "toggle_reprompt"      # Phase 4 Edge
     DELETE_ATTACHMENT = "delete_attachment"  # Phase 4 Edge
 
+class TemplateType(StrEnum):
+    ITEM = "item"
+    LOGIN = "item.login"
+    CARD = "item.card"
+    IDENTITY = "item.identity"
+    SECURE_NOTE = "item.secureNote"
+    FOLDER = "folder"
+
 class FolderAction(StrEnum):
     CREATE = "create_folder"
     RENAME = "rename_folder"
