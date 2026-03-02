@@ -34,7 +34,7 @@ BW-MCP compensates with a **WAL + LIFO Rollback** engine (Saga Pattern). This is
 This can only happen in combination with a concurrent external event (see Section 2 below).
 
 ### Mitigation
-- **Use short batches.** The proxy enforces a maximum of `MAX_BATCH_SIZE` operations (default: 10) per transaction call. The fewer operations, the shorter the execution window.
+- **Use short batches.** The proxy enforces a maximum of `MAX_BATCH_SIZE` operations (default: 25) per transaction call. The fewer operations, the shorter the execution window.
 - **Monitor your logs.** Every transaction produces a `.json` file in `~/.bw_mcp/logs/` with its `STATUS`. An unexpected `ROLLBACK_FAILED` status is the signal to inspect your vault.
 - **After a `FATAL` error:** Consult the `.log` file for the exact `[FAILED TO REVERT]` command and execute it manually (`bw edit item <id> '<json>'`).
 
@@ -50,7 +50,7 @@ A **Race Condition** occurs when two concurrent actors (the proxy + an external 
 ### Illustrated Scenario: The Deadly Race
 
 ```text
-| Timeline (ms)                     | BW-MCP                       | Your Mobile App       |
+| Timeline (ms)                     | BW-MCP                               | Your Mobile App       |
 | --------------------------------- | ------------------------------------ | --------------------- |
 | 0ms                               | TX starts (3 ops):                   |
 | 1ms                               | [OP 1] rename "Github" → "GitHub"    | ← executes OK ✅       |
@@ -68,7 +68,7 @@ Result: "Netflix" was NOT moved. "GitHub" was deleted externally.
 
 ### Mitigation
 1. **Treat MCP transactions like database migrations**: During an active session, consider your vault temporarily "exclusive write locked" from a policy standpoint. Avoid touching the vault from another client.
-2. **Use small, focused batches.** A 3-operation transaction has a `3ms → 30ms` exposure window. A 10-operation batch has a `~100ms` window. More operations = more time = more risk.
+2. **Use small, focused batches.** The exposure window is directly proportional to the number of operations. Fewer operations equal less time and less risk.
 3. **Prefer atomic, single-item operations for frequently-edited items.** Items you edit often (e.g., work credentials rotated by scripts) should be moved individually.
 4. **Sync before and after.** Running `bw sync` before a large transaction ensures the proxy starts with the most current vault state.
 
@@ -94,7 +94,7 @@ FATAL ERROR: Both execution and rollback sessions are dead.
 ```
 
 ### Mitigation
-1. **Keep batches small and fast.** A 10-operation batch completes in milliseconds. A 100-operation batch creates a multi-second window where a session can expire.
+1. **Keep batches small and fast.** Smaller batches complete in milliseconds, whereas very large batches create a multi-second window where a session can expire.
 2. **Avoid long transactions on unstable networks (mobile hotspot, public Wi-Fi).** The proxy relies on the session remaining valid for the full duration of the batch.
 3. **The WAL is your idempotent safety net.** After a session timeout crash, the encrypted WAL is preserved at `~/.bw_mcp/wal/pending_transaction.wal`. On the next tool call, `check_recovery()` re-prompts for the Master Password, decrypts the WAL via PBKDF2/Fernet, and re-attempts the rollback using your fresh session.
 

@@ -2,10 +2,10 @@
 
 [ ⬅️ 07: Advanced Search Filtering ](07_simulation_advanced_search.md) | [ Back to README ➡️ ](../README.md)
 
-**Context:** The AI Assistant `antigravity` is performing a batch migration: moving 8 items to a new folder and deleting 2 obsolete ones — 10 operations in total (the configured `MAX_BATCH_SIZE` cap).
+**Context:** The AI Assistant `antigravity` is performing a batch migration: moving several items to a new folder and deleting obsolete ones — reaching the maximum operations configured in `MAX_BATCH_SIZE`.
 
 ## 🕒 T+0: The Request
-Assistant sends a `propose_vault_transaction` with 10 operations.
+Assistant sends a `propose_vault_transaction` with a full batch of operations.
 - **Rationale:** `"Migrating legacy project credentials to the archived folder and purging expired entries."`
 
 ## 🛡️ T+2s: WAL Initialization
@@ -21,7 +21,7 @@ Assistant sends a `propose_vault_transaction` with 10 operations.
     - `bw move item-2 to archived-folder` → OK, WAL = `[rb_1, rb_2]`
     - ...
     - `bw delete item-9` → OK, WAL = `[rb_1, ..., rb_9]`
-3. **CRASH:** At operation 10, the user's computer loses power.
+3. **CRASH:** At the final operation, the user's computer loses power.
 
 **Vault State:** 9 ops are live on the Bitwarden server. The WAL has 9 rollback commands.
 
@@ -83,9 +83,9 @@ If `_perform_rollback` encounters an error (e.g. `"Item not found"` because it w
   ```
 - The LLM can distinguish: **transient error** (retry) vs **permanent error** (escalate to user).
 
-## 💨 The 10-Op Batch Cap (Why It Matters Here)
+## 💨 The Batch Cap (Why It Matters Here)
 
-This scenario was only possible because of the `MAX_BATCH_SIZE` configuration. Without it, the AI could have sent 25+ operations, dramatically widening the risk window and making the WAL larger and the rollback more complex.
+**Use short batches.** The proxy enforces a maximum of `MAX_BATCH_SIZE` operations (default: 25) per transaction call. The fewer operations, the shorter the execution window, dramatically reducing the risk window and making the WAL smaller and the rollback less complex.
 
 ## 📎 The ACID Result
 - **Atomicity (A):** Despite the crash, the final state is "Nothing was changed". The saga rollback guarantees it.
