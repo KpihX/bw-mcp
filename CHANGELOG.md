@@ -1,6 +1,9 @@
 # CHANGELOG: The Sovereign Journey of BW-MCP 🛡️
 
 All notable changes to this project, from its inception to the current secure state.
+## [v1.6.1] - 2026-03-02: Critical Security Patch (Secret Context Scrubbing)
+### 🔒 Security
+- **Patched Early-Exit Secret Leak**: Fixed a catastrophic memory leak in `execute_batch` and `get_vault_map` where an early exception (e.g., incorrect Master Password, or Zenity abort) would bypass the `finally` block preventing the memory-scrubbing loop (`for i in range(len(session_key)): session_key[i] = 0`). The entire logic was refactored into a unified master `try...finally` block.
 
 ## [v1.6.0] - 2026-03-02: Blind Secret Comparator (AI-Blind Audit Primitive)
 ### 🆕 Features

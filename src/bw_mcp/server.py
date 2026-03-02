@@ -48,18 +48,20 @@ def get_vault_map(
     The agent CANNOT see passwords, TOTP tokens, or secure notes.
     This action requires the Master Password once to unlock the vault temporarily.
     """
+    master_password = None
+    session_key = None
     try:
-        master_password = HITLManager.ask_master_password(title="Proxy Request: Read Vault Map")
-        session_key = SecureSubprocessWrapper.unlock_vault(master_password)
-        
-        recovery_msg = TransactionManager.check_recovery(master_password, session_key)
-        if recovery_msg:
-            return recovery_msg
+        try:
+            master_password = HITLManager.ask_master_password(title="Proxy Request: Read Vault Map")
+            session_key = SecureSubprocessWrapper.unlock_vault(master_password)
             
-    except Exception as e:
-        return f"Access Denied or Recovery Failed: {_safe_error_message(e)}"
-        
-    try:
+            recovery_msg = TransactionManager.check_recovery(master_password, session_key)
+            if recovery_msg:
+                return recovery_msg
+                
+        except Exception as e:
+            return f"Access Denied or Recovery Failed: {_safe_error_message(e)}"
+            
         items_base_args = ["list", "items"]
         if search_items: items_base_args.extend(["--search", search_items])
         if folder_id: items_base_args.extend(["--folderid", folder_id])
@@ -130,11 +132,11 @@ def get_vault_map(
         return f"Proxy Internal Error during serialization: {_safe_error_message(e)}"
     finally:
         # Clean session key and master password from memory securely
-        if 'session_key' in locals():
+        if session_key is not None:
             for i in range(len(session_key)):
                 session_key[i] = 0
             del session_key
-        if 'master_password' in locals():
+        if master_password is not None:
             for i in range(len(master_password)):
                 master_password[i] = 0
             del master_password
@@ -347,11 +349,11 @@ def _fetch_template(template_type: str) -> str:
         valid_types = [e.value for e in TemplateType]
         return f"Error: Invalid template type '{template_type}'. Must be one of: {', '.join(valid_types)}"
 
-    master_password = HITLManager.ask_master_password(title=f"Enter Master Password to fetch {valid_type.value} schema")
-    if not master_password:
-        return "Error: User cancelled authentication. Cannot fetch template."
-
+    master_password = None
+    session_key = None
     try:
+        master_password = HITLManager.ask_master_password(title=f"Enter Master Password to fetch {valid_type.value} schema")
+        
         session_key = SecureSubprocessWrapper.unlock_vault(master_password)
         template_data = SecureSubprocessWrapper.execute_json(["get", "template", valid_type.value], session_key)
         safe_data = deep_scrub_payload(template_data)
@@ -368,11 +370,11 @@ def _fetch_template(template_type: str) -> str:
     except Exception as e:
         return f"Proxy Error: {_safe_error_message(e)}"
     finally:
-        if 'session_key' in locals():
+        if session_key is not None:
             for i in range(len(session_key)):
                 session_key[i] = 0
             del session_key
-        if 'master_password' in locals():
+        if master_password is not None:
             for i in range(len(master_password)):
                 master_password[i] = 0
             del master_password

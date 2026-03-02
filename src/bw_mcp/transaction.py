@@ -143,109 +143,118 @@ class TransactionManager:
         if not payload.operations:
             return "Error: No operations provided in the transaction payload."
             
+        master_password = None
+        session_key = None
         try:
-            master_password = HITLManager.ask_master_password(title="Unlock Vault for Transaction Review")
-        except Exception as e:
-            return f"Transaction aborted: {_safe_error_message(e)}"
-            
-        try:
-            session_key = SecureSubprocessWrapper.unlock_vault(master_password)
-        except SecureBWError as e:
-            return f"Transaction failed during unlock: {str(e)}"
-            
-        id_to_name = TransactionManager._resolve_action_names(payload.operations, session_key)
-            
-        approved = HITLManager.review_transaction(payload, id_to_name=id_to_name)
-        if not approved:
-            for i in range(len(session_key)): session_key[i] = 0
-            return "Transaction aborted by the user."
-            
-        results = []
-        executed_ops: List[str] = []
-        failed_op = None
-        executed_rolled_back_cmds = []
-        failed_rollback_cmd = None   # Only ONE cmd can fail per LIFO sequential pass
-        
-        rollback_stack: List[Dict[str, Any]] = []
-        tx_id = str(uuid.uuid4())
-        logger_status = TransactionStatus.SUCCESS
-        logger_err = None
-        
-        # Initialize WAL
-        WALManager.write_wal(tx_id, rollback_stack, master_password)
-        
-        try:
-            for op in payload.operations:
-                msg, rollback_cmds = TransactionManager._execute_single_action(op, session_key)
-                results.append(msg)
+            try:
+                master_password = HITLManager.ask_master_password(title="Unlock Vault for Transaction Review")
+            except Exception as e:
+                return f"Transaction aborted: {_safe_error_message(e)}"
                 
-                # Operation succeeded, record its human-readable message trace
-                executed_ops.append(msg)
+            try:
+                session_key = SecureSubprocessWrapper.unlock_vault(master_password)
+            except SecureBWError as e:
+                return f"Transaction failed during unlock: {str(e)}"
                 
-                if rollback_cmds:
-                    # Append commands in reverse to maintain LIFO execution during rollback
-                    rollback_stack.extend(reversed(rollback_cmds))
-                    WALManager.write_wal(tx_id, rollback_stack, master_password)
+            try:
+                id_to_name = TransactionManager._resolve_action_names(payload.operations, session_key)
+            except SecureBWError as e:
+                # Let resolution errors explicitly inform the LLM instead of crashing
+                return f"Transaction failed during target resolution: {str(e)}"
+                
+            approved = HITLManager.review_transaction(payload, id_to_name=id_to_name)
+            if not approved:
+                return "Transaction aborted by the user."
+                
+            results = []
+            executed_ops: List[str] = []
+            failed_op = None
+            executed_rolled_back_cmds = []
+            failed_rollback_cmd = None   # Only ONE cmd can fail per LIFO sequential pass
+            
+            rollback_stack: List[Dict[str, Any]] = []
+            tx_id = str(uuid.uuid4())
+            logger_status = TransactionStatus.SUCCESS
+            logger_err = None
+            
+            # Initialize WAL
+            WALManager.write_wal(tx_id, rollback_stack, master_password)
+            
+            try:
+                for op in payload.operations:
+                    msg, rollback_cmds = TransactionManager._execute_single_action(op, session_key)
+                    results.append(msg)
                     
-            WALManager.clear_wal()
-            return "Transaction completed successfully.\n" + "\n".join(results)
-        except Exception as main_err:
-            logger_err = _safe_error_message(main_err)
-            
-            # Since the current op caused the exception, it's not in executed_ops
-            # We can deduce the failed operation by looking at the len of executed_ops
-            idx = len(executed_ops)
-            if idx < len(payload.operations):
-                failed_op = payload.operations[idx].model_dump(exclude_none=True)
-                
-            logger_status = TransactionStatus.ROLLBACK_TRIGGERED
-            # Delegate to the shared engine — no WAL mutation inside (except popping)
-            rb_result = TransactionManager._perform_rollback(tx_id, rollback_stack, master_password, session_key)
-            
-            executed_rolled_back_cmds = rb_result["executed"]
-            failed_rollback_cmd = rb_result["failed_cmd"]
-            
-            if rb_result["success"]:
+                    # Operation succeeded, record its human-readable message trace
+                    executed_ops.append(msg)
+                    
+                    if rollback_cmds:
+                        # Append commands in reverse to maintain LIFO execution during rollback
+                        rollback_stack.extend(reversed(rollback_cmds))
+                        WALManager.write_wal(tx_id, rollback_stack, master_password)
+                        
                 WALManager.clear_wal()
-                logger_status = TransactionStatus.ROLLBACK_SUCCESS
+                return "Transaction completed successfully.\n" + "\n".join(results)
+            except Exception as main_err:
+                logger_err = _safe_error_message(main_err)
                 
-                safe_err = _safe_error_message(main_err)
-                # Scrub failed_op before returning to LLM to prevent leaking secret field values
-                scrubbed_failed_op = deep_scrub_payload(failed_op) if failed_op else None
-                err_msg = f"CRITICAL: Transaction failed during the following operation:\n{json.dumps(scrubbed_failed_op, indent=2)}\n\nError: {safe_err}\n\n"
-                err_msg += f"A full rollback was successfully performed. The {len(executed_rolled_back_cmds)} commands executed to revert your previous {len(executed_ops)} operations have reversed the vault back to its pristine state."
-                return err_msg
-            else:
-                logger_status = TransactionStatus.ROLLBACK_FAILED
-                safe_err = _safe_error_message(main_err)
-                # Enrich logger_err with the full dual error chain for total log transparency
-                logger_err = f"ExecutionError: {safe_err} | RollbackError: {rb_result['error']}"
+                # Since the current op caused the exception, it's not in executed_ops
+                # We can deduce the failed operation by looking at the len of executed_ops
+                idx = len(executed_ops)
+                if idx < len(payload.operations):
+                    failed_op = payload.operations[idx].model_dump(exclude_none=True)
+                    
+                logger_status = TransactionStatus.ROLLBACK_TRIGGERED
+                # Delegate to the shared engine — no WAL mutation inside (except popping)
+                rb_result = TransactionManager._perform_rollback(tx_id, rollback_stack, master_password, session_key)
                 
-                fatal_msg = f"FATAL ERROR: Transaction failed, AND the rollback mechanism also failed. Vault is in an inconsistent state!\n"
-                fatal_msg += f"Execution Error: {safe_err}\n"
-                fatal_msg += f"Rollback Error: {rb_result['error']}\n\n"
-                fatal_msg += f"The following rollback commands successfully executed before crash: {json.dumps(executed_rolled_back_cmds)}\n"
-                fatal_msg += f"The command that failed to rollback: {failed_rollback_cmd}\n"
+                executed_rolled_back_cmds = rb_result["executed"]
+                failed_rollback_cmd = rb_result["failed_cmd"]
                 
-                return fatal_msg
+                if rb_result["success"]:
+                    WALManager.clear_wal()
+                    logger_status = TransactionStatus.ROLLBACK_SUCCESS
+                    
+                    safe_err = _safe_error_message(main_err)
+                    # Scrub failed_op before returning to LLM to prevent leaking secret field values
+                    scrubbed_failed_op = deep_scrub_payload(failed_op) if failed_op else None
+                    err_msg = f"CRITICAL: Transaction failed during the following operation:\n{json.dumps(scrubbed_failed_op, indent=2)}\n\nError: {safe_err}\n\n"
+                    err_msg += f"A full rollback was successfully performed. The {len(executed_rolled_back_cmds)} commands executed to revert your previous {len(executed_ops)} operations have reversed the vault back to its pristine state."
+                    return err_msg
+                else:
+                    logger_status = TransactionStatus.ROLLBACK_FAILED
+                    safe_err = _safe_error_message(main_err)
+                    # Enrich logger_err with the full dual error chain for total log transparency
+                    logger_err = f"ExecutionError: {safe_err} | RollbackError: {rb_result['error']}"
+                    
+                    fatal_msg = f"FATAL ERROR: Transaction failed, AND the rollback mechanism also failed. Vault is in an inconsistent state!\n"
+                    fatal_msg += f"Execution Error: {safe_err}\n"
+                    fatal_msg += f"Rollback Error: {rb_result['error']}\n\n"
+                    fatal_msg += f"The following rollback commands successfully executed before crash: {json.dumps(executed_rolled_back_cmds)}\n"
+                    fatal_msg += f"The command that failed to rollback: {failed_rollback_cmd}\n"
+                    
+                    return fatal_msg
+            finally:
+                # Pass all tracing info directly to the logic logger using kwargs
+                TransactionLogger.log_transaction(
+                    transaction_id=tx_id, 
+                    payload=payload, 
+                    status=logger_status, 
+                    error_message=logger_err,
+                    executed_ops=executed_ops,
+                    failed_op=failed_op,
+                    executed_rolled_back_cmds=executed_rolled_back_cmds,
+                    failed_rollback_cmd=failed_rollback_cmd
+                )
         finally:
-            # Pass all tracing info directly to the logic logger using kwargs
-            TransactionLogger.log_transaction(
-                transaction_id=tx_id, 
-                payload=payload, 
-                status=logger_status, 
-                error_message=logger_err,
-                executed_ops=executed_ops,
-                failed_op=failed_op,
-                executed_rolled_back_cmds=executed_rolled_back_cmds,
-                failed_rollback_cmd=failed_rollback_cmd
-            )
-            for i in range(len(session_key)):
-                session_key[i] = 0
-            del session_key
-            for i in range(len(master_password)):
-                master_password[i] = 0
-            del master_password
+            if session_key is not None:
+                for i in range(len(session_key)):
+                    session_key[i] = 0
+                del session_key
+            if master_password is not None:
+                for i in range(len(master_password)):
+                    master_password[i] = 0
+                del master_password
 
     @staticmethod
     def _resolve_action_names(operations: List[VaultTransactionAction], session_key: bytearray) -> Dict[str, str]:
