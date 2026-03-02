@@ -476,7 +476,7 @@ Error: Invalid transaction payload. ValidationError: An internal error occurred.
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                       BW-MCP — ARCHITECTURE                         │
+│                       BW-MCP — ARCHITECTURE                                 │
 └─────────────────────────────────────────────────────────────────────────────┘
 
   ┌──────────────────────────┐
@@ -492,8 +492,8 @@ Error: Invalid transaction payload. ValidationError: An internal error occurred.
          │                          │ READ path
          │ WRITE path               ▼
          │                 ┌───────────────────┐
-         │                 │  Pydantic Models   │  BlindItem redaction
-         │                 │  models.py  🔒     │  extra="forbid" on writes
+         │                 │  Pydantic Models  │  BlindItem redaction
+         │                 │  models.py  🔒    │  extra="forbid" on writes
          │                 └────────┬──────────┘
          │                          │ Redacted payload → back to Agent
          ▼
@@ -535,6 +535,11 @@ Error: Invalid transaction payload. ValidationError: An internal error occurred.
 ## 🛠️ Exhaustive API Coverage (16 Enum Actions)
 
 The proxy maps Bitwarden's complex CLI into 16 robust, completely secure internal Enums.
+
+### 🧠 AI Contextualization (Templates)
+Before manipulating data, the AI or the Human can fetch the exact, strict JSON schemas of Bitwarden entities. This prevents hallucinated fields and ensures migrations perfectly match the `bw` CLI expectations.
+- **`get_bitwarden_template(template_type)` Tool**: A native MCP tool allowing the autonomous agent to securely fetch the JSON schema of entities (e.g., `item.login`, `item.card`, `folder`). Secrets are proactively scrubbed *before* reaching the LLM context.
+- **`bw://templates/{template_type}` Resources**: Native MCP resources exposed to the host application. A human operator can inject clean Bitwarden schemas directly into the prompt without requiring a tool execution round-trip (e.g., typing `@bw://templates/item.login` in Cursor).
 
 ### Item Organization (`ItemAction`)
 1.  **`create_item`**: Spawns an empty shell (Login, Note, Card, Identity) locally. Strictly blocks LLM from creating secrets safely.
