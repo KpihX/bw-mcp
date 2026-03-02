@@ -47,11 +47,47 @@ class HITLManager:
             if name: return f"'{html.escape(name)}'"
             return f"{prefix}({uuid})"
 
+        def dict_to_str(d: dict) -> str:
+            items = []
+            for k, v in d.items():
+                if v is None or v == "": continue
+                # Do not show proxy redacted tags in the UI
+                if isinstance(v, str) and "[REDACTED" in v: continue
+                
+                if isinstance(v, list):
+                    if not v: continue
+                    if all(isinstance(x, dict) and "uri" in x for x in v):
+                        val = f"[{', '.join(html.escape(str(x.get('uri', ''))) for x in v)}]"
+                    else:
+                        val = f"[{len(v)} items]"
+                else:
+                    val = f"'{html.escape(str(v))}'"
+                items.append(f"{k}={val}")
+            return " | ".join(items)
+
         # --- ITEM ACTIONS ---
         if op.action == ItemAction.CREATE:
             t_str = {1: "Login", 2: "SecureNote", 3: "Card", 4: "Identity"}.get(op.type, "Unknown")
-            # If creating a new item, op.name is available directly
-            return f"🌟 CREATE ITEM ({t_str}) -> '{html.escape(op.name)}'" + (f" in folder {resolve(op.folder_id, 'folder ')}" if op.folder_id else "")
+            details = []
+            if getattr(op, "notes", None): details.append("notes=...")
+            
+            if op.type == 1 and getattr(op, "login", None):
+                f = dict_to_str(op.login.model_dump(exclude_unset=True))
+                if f: details.append(f"login: ({f})")
+            elif op.type == 3 and getattr(op, "card", None):
+                f = dict_to_str(op.card.model_dump(exclude_unset=True))
+                if f: details.append(f"card: ({f})")
+            elif op.type == 4 and getattr(op, "identity", None):
+                f = dict_to_str(op.identity.model_dump(exclude_unset=True))
+                if f: details.append(f"identity: ({f})")
+                
+            if getattr(op, "fields", None) and op.fields:
+                f_strs = [f"{f.name}={f.value}" for f in op.fields if f.type in [0, 2]]
+                if f_strs: details.append(f"custom_fields: ({' | '.join(html.escape(s) for s in f_strs)})")
+                
+            d_str = f" [{', '.join(details)}]" if details else ""
+            return f"🌟 CREATE ITEM ({t_str}) -> '{html.escape(op.name)}'{d_str}" + (f" in folder {resolve(op.folder_id, 'folder ')}" if op.folder_id else "")
+            
         elif op.action == ItemAction.RENAME:
             return f"✏️ RENAME ITEM {resolve(op.target_id)} -> '{html.escape(op.new_name)}'"
         elif op.action == ItemAction.MOVE_TO_FOLDER:
@@ -82,20 +118,35 @@ class HITLManager:
         # --- EDIT ACTIONS ---
         elif op.action == EditAction.LOGIN:
             changes = []
-            if op.username: changes.append(f"Username='{html.escape(op.username)}'")
-            if op.uris: changes.append(f"URIs={len(op.uris)} values")
-            return f"🔧 EDIT LOGIN {resolve(op.target_id)} -> {', '.join(changes)}"
+            if getattr(op, "username", None) is not None: 
+                changes.append(f"username='{html.escape(op.username)}'")
+            if getattr(op, "uris", None) is not None:
+                uri_strs = [html.escape(u.get("uri", "")) for u in op.uris if isinstance(u, dict)]
+                changes.append(f"uris=[{', '.join(uri_strs)}]")
+            return f"🔧 EDIT LOGIN {resolve(op.target_id)} -> {', '.join(changes) if changes else 'No changes'}"
+            
         elif op.action == EditAction.CARD:
             changes = []
-            if op.cardholderName: changes.append("Name")
-            if op.brand: changes.append("Brand")
-            if op.expMonth or op.expYear: changes.append("Expiry")
-            return f"💳 EDIT CARD {resolve(op.target_id)} -> {', '.join(changes)}"
+            if getattr(op, "cardholderName", None) is not None: changes.append(f"cardholderName='{html.escape(op.cardholderName)}'")
+            if getattr(op, "brand", None) is not None: changes.append(f"brand='{html.escape(op.brand)}'")
+            if getattr(op, "expMonth", None) is not None: changes.append(f"expMonth='{html.escape(op.expMonth)}'")
+            if getattr(op, "expYear", None) is not None: changes.append(f"expYear='{html.escape(op.expYear)}'")
+            return f"💳 EDIT CARD {resolve(op.target_id)} -> {', '.join(changes) if changes else 'No changes'}"
+            
         elif op.action == EditAction.IDENTITY:
-            return f"🪪 EDIT IDENTITY {resolve(op.target_id)} -> Updated contact fields"
+            fields = ["title", "firstName", "middleName", "lastName", "address1", "address2", "address3", "city", "state", "postalCode", "country", "company", "email", "phone", "username"]
+            changes = []
+            for f in fields:
+                val = getattr(op, f, None)
+                if val is not None:
+                    changes.append(f"{f}='{html.escape(val)}'")
+            return f"🪪 EDIT IDENTITY {resolve(op.target_id)} -> {', '.join(changes) if changes else 'No changes'}"
+            
         elif op.action == EditAction.CUSTOM_FIELD:
-            t_str = "Text" if op.type == 0 else "Boolean"
-            return f"🏷️ UPSERT FIELD {resolve(op.target_id)} -> [{t_str}] '{html.escape(op.name)}' = '{html.escape(op.value)}'"
+            t_str = "Text" if getattr(op, "type", 0) == 0 else "Boolean"
+            # Values are coerced to string for Custom Fields, but handle None just in case
+            val_str = html.escape(str(op.value)) if op.value is not None else ""
+            return f"🏷️ UPSERT FIELD {resolve(op.target_id)} -> [{t_str}] '{html.escape(op.name)}' = '{val_str}'"
             
         return f"❓ UNKNOWN ACTION: {op.action}"
 

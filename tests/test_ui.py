@@ -23,7 +23,7 @@ def test_ui_format_operations():
     assert "♻️ RESTORE ITEM (2) -> From Trash" in HITLManager._format_operation(op_restore, id_map)
     assert "🏷️ UPSERT FIELD (3) -> [Text] 'API Key' = 'sk_123'" in HITLManager._format_operation(op_field, id_map)
     assert "💥 DELETE FOLDER 'Bad Folder'" in HITLManager._format_operation(op_del, id_map)
-    assert "🔧 EDIT LOGIN (5) -> Username='user@foo.com'" in HITLManager._format_operation(op_login, id_map)
+    assert "🔧 EDIT LOGIN (5) -> username='user@foo.com'" in HITLManager._format_operation(op_login, id_map)
 
 from unittest.mock import patch, MagicMock
 
