@@ -13,3 +13,8 @@ wheels/
 MEMORY.md
 AGENT.md
 GEMINI.md
+CLAUDE.md
+AGENTS.md
+VIBE.md
+COPILOT.md
+.agent/

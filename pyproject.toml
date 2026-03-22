@@ -18,7 +18,7 @@ dependencies = [
 
 [project.scripts]
 bw-mcp = "bw_mcp.main:main"
-bw-proxy = "bw_mcp.cli:app"
+bw-admin = "bw_mcp.cli:app"
 
 [build-system]
 requires = ["uv_build>=0.10.3,<0.11.0"]
