@@ -353,19 +353,30 @@ class TransactionManager:
             # bw create requires base64-encoded JSON
             encoded_b64 = base64.b64encode(json.dumps(item_tpl).encode()).decode()
             res_str = SecureSubprocessWrapper.execute(["create", "item", encoded_b64], session_key)
-            
+
             try:
                 new_id = json.loads(res_str).get("id")
-            except Exception:
+            except (json.JSONDecodeError, AttributeError):
                 new_id = None
-            
-            rollback_cmds = []
-            if new_id:
-                rollback_cmds = [
-                    {"cmd": ["bw", "delete", "item", new_id]},
-                    {"cmd": ["bw", "delete", "item", new_id, "--permanent"]}
-                ]
-            
+
+            if not new_id:
+                # The item was physically created in Bitwarden (CLI exited 0) but the
+                # response is unparseable. We cannot register a rollback command without
+                # the UUID. Raising here is safer than returning empty rollback_cmds and
+                # silently proceeding — the batch fails loudly, prior ops are reversed,
+                # and the user is informed that this specific item may be an orphan.
+                raise SecureBWError(
+                    f"create_item for '{op.name}' succeeded in Bitwarden but returned no "
+                    f"parseable item ID. The item may exist as an orphan in your vault. "
+                    f"Rollback of this creation is impossible — please delete it manually via "
+                    f"the Bitwarden web vault or CLI. Prior operations in this batch have been rolled back."
+                )
+
+            rollback_cmds = [
+                {"cmd": ["bw", "delete", "item", new_id]},
+                {"cmd": ["bw", "delete", "item", new_id, "--permanent"]}
+            ]
+
             return f"-> Created new {op.type} item '{op.name}'", rollback_cmds
             
         elif op.action == ItemAction.RENAME:

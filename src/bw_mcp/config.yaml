@@ -1,6 +1,6 @@
 proxy:
   name: BW-MCP
-  state_directory: ~/.bw_mcp
+  state_directory: ~/.bw/mcp
   max_batch_size: 25
 redaction:
   populated_tag: "[REDACTED_BY_PROXY_POPULATED]"

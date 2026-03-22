@@ -270,7 +270,7 @@ The proxy was killed mid-transaction (power cut, `kill -9`). On the next MCP too
 
 ### 📦 The WAL File: Your Last Line of Defense
 
-During every transaction execution, the proxy writes an **AES-encrypted Write-Ahead Log** to `~/.bw_mcp/wal/pending_transaction.wal` **before** each CLI command is executed. The file is deleted once the batch completes (success or clean rollback). If it exists when the proxy starts, it's a crash signal.
+During every transaction execution, the proxy writes an **AES-encrypted Write-Ahead Log** to `~/.bw/mcp/wal/pending_transaction.wal` **before** each CLI command is executed. The file is deleted once the batch completes (success or clean rollback). If it exists when the proxy starts, it's a crash signal.
 
 #### 🔐 WAL Encryption Architecture
 
@@ -512,7 +512,7 @@ Error: Invalid transaction payload. ValidationError: An internal error occurred.
          ▼
   ┌──────────────────────────┐
   │  WAL Disk (Encrypted)    │  Fernet(AES-128) + PBKDF2(480k iter) + salt
-  │  ~/.bw_mcp/wal/  │  chmod 600 · idempotent pop on each step
+  │  ~/.bw/mcp/wal/  │  chmod 600 · idempotent pop on each step
   └──────┬───────────────────┘
          │
          ▼
@@ -647,7 +647,7 @@ Following the developer mandate of **Independent Autonomous Packages**, the conf
 # src/bw_mcp/config.yaml
 proxy:
   name: "BW-MCP"
-  state_directory: "~/.bw_mcp"
+  state_directory: "~/.bw/mcp"
   max_batch_size: 25
 
 redaction:
@@ -667,10 +667,10 @@ wal_crypto:
 
 ## 📂 Transparency & File Structure
 
-The proxy maintains a centralized state directory (configurable) for auditing and recovery: `~/.bw_mcp/`
+The proxy maintains a centralized state directory (configurable) for auditing and recovery: `~/.bw/mcp/`
 
 ```text
-~/.bw_mcp/
+~/.bw/mcp/
 ├── logs/                  # Immutable Audit Trail (Scrubbed of secrets) — JSON format
 │   ├── 2026-02-28_10-00-01_<uuid>_success.json
 │   ├── 2026-02-28_10-15-45_<uuid>_rollback_success.json

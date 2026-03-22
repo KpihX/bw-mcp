@@ -1,6 +1,21 @@
 # CHANGELOG: The Sovereign Journey of BW-MCP 🛡️
 
 All notable changes to this project, from its inception to the current secure state.
+
+## [v1.7.1] - 2026-03-22: WAL Security Hardening & Robustness Fixes
+
+### 🔒 Security
+- **WAL Log Sanitization**: `inspect_transaction_log` now uses `_sanitize_args_for_log` instead of `deep_scrub_payload` for rollback command arrays. `deep_scrub_payload` only redacts dict keys and cannot decode base64-encoded item JSON (which may contain passwords); `_sanitize_args_for_log` whitelists only known-safe BW CLI tokens and replaces everything else with `[PAYLOAD]`.
+
+### 🐛 Bug Fixes
+- **Specific Exception Handling**: Replaced broad `except Exception` with `except (json.JSONDecodeError, AttributeError)` in `transaction.py` rollback flow for cleaner error surface.
+- **Path Fix in CHANGELOG**: Corrected PID file path reference (`~/.bw_mcp/` → `~/.bw/mcp/`).
+
+### 🔧 Housekeeping
+- Import cleanup across `config.py`, `daemon.py`, `logger.py`.
+- `uv.lock` dependency refresh.
+- Doc fixes in `README.md` and `docs/`.
+
 ## [v1.7.0] - 2026-03-02: Security Hardening & Robustness Audit
 ### 🔒 Security
 - **DoS Prevention (Search Truncation)**: Implemented strict 256-character truncation for all search strings (`search_items`, `search_folders`) in `get_vault_map`. Prevents Memory/CPU exhaustion from malicious LLM-generated payloads.
@@ -77,7 +92,7 @@ All notable changes to this project, from its inception to the current secure st
 ## [v1.3.1] - 2026-03-01: The Daemon Evolution & Batch Upgrade
 ### ⚙️ Daemon Lifecycle Control
 - **Typer CLI Overhaul**: Refactored the core `bw-mcp` entry point (`__init__.py` -> `main.py`) from a bare `main()` into a fully-fledged Typer CLI with systemd-like daemon controls.
-- **PID File Management**: Created `daemon.py` to manage a stateful `~/.bw_mcp/bw-mcp.pid` tracking the live FastMCP stdio process.
+- **PID File Management**: Created `daemon.py` to manage a stateful `~/.bw/mcp/bw-mcp.pid` tracking the live FastMCP stdio process.
 - **Lifecycle Commands**: Introduced new subcommands for manual or automated control without breaking the core MCP protocol:
   - `bw-mcp serve` (Default backward-compatible entrypoint for Gemini/Claude/Cursor)
   - `bw-mcp status` (Check PID heartbeat)

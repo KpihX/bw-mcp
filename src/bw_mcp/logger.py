@@ -54,7 +54,7 @@ class TransactionLogger:
             "rationale": payload.rationale,
             "error_message": error_message,
             "operations_requested": deep_scrub_payload(payload.model_dump().get("operations", [])),
-            "execution_trace": [msg.lstrip('-> ').strip() for msg in (executed_ops or [])],
+            "execution_trace": [msg.removeprefix('-> ').strip() for msg in (executed_ops or [])],
             "failed_execution": deep_scrub_payload(failed_op),
             "rollback_trace": executed_rolled_back_cmds or [],
             "failed_rollback": failed_rollback_cmd

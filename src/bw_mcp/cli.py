@@ -9,7 +9,7 @@ from .logger import LOG_DIR, TransactionLogger
 from .wal import WALManager
 from .models import TransactionStatus
 from .scrubber import deep_scrub_payload
-from .subprocess_wrapper import SecureProxyError
+from .subprocess_wrapper import SecureProxyError, _sanitize_args_for_log
 from typing import Optional
 from .config import load_config, update_config
 from importlib.metadata import version as pkg_version
@@ -131,7 +131,20 @@ def wal_view():
             console.print(f"Transaction ID: {wal_data.get('transaction_id')}")
             console.print(f"Pending Rollback Commands stack size: {len(wal_data.get('rollback_commands', []))}")
             console.print("\n[cyan]Full WAL state (secrets scrubbed):[/cyan]")
-            console.print(JSON(json.dumps(deep_scrub_payload(wal_data))))
+            # deep_scrub_payload only redacts dict keys — it cannot decode and inspect
+            # base64 blobs stored as plain strings in cmd arrays. The rollback commands
+            # contain base64-encoded full item JSON (with passwords). We apply
+            # _sanitize_args_for_log on each cmd array instead, which whitelists only
+            # known-safe BW CLI tokens and replaces everything else with [PAYLOAD].
+            safe_wal = {
+                "transaction_id": wal_data.get("transaction_id"),
+                "timestamp": wal_data.get("timestamp"),
+                "rollback_commands": [
+                    {"cmd": _sanitize_args_for_log(entry.get("cmd", []))}
+                    for entry in wal_data.get("rollback_commands", [])
+                ],
+            }
+            console.print(JSON(json.dumps(safe_wal)))
             console.print("\nThe proxy will automatically resolve this upon the next MCP execution.")
             
         except ValueError as e:

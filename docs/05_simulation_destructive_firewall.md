@@ -94,13 +94,13 @@ L'agent IA, qui était "gelé" (en attente du serveur) pendant tout ce processus
 The proxy intercepts this instruction. Because the user is manipulating two distinct entries, the proxy wraps the entire operation in a strict **ACID-compliant Virtual Vault Transaction**:
 
 1. **Virtual Execution (RAM):** The proxy pulls the current records into isolated memory blocks. It virtually simulates assigning `favorite: false` to item A and `delete` to Item B.
-2. **Write-Ahead Logging (Disk):** Recognizing that deleting an item is destructive, it mathematically deduces the reverse logic (`bw restore B` and `bw edit A`). It encrypts these commands using Fernet (AES-128-CBC + HMAC) with a key derived from the Master Password via PBKDF2 (480k iterations) and writes them to `~/.bw_mcp/wal/pending_transaction.wal`.
+2. **Write-Ahead Logging (Disk):** Recognizing that deleting an item is destructive, it mathematically deduces the reverse logic (`bw restore B` and `bw edit A`). It encrypts these commands using Fernet (AES-128-CBC + HMAC) with a key derived from the Master Password via PBKDF2 (480k iterations) and writes them to `~/.bw/mcp/wal/pending_transaction.wal`.
 3. **Execution & The Firewall:**
     *   The OS intercepts the subprocess. Zenity freezes the desktop.
     *   "**Do you wish to permit `antigravity` to un-favorite `Mail` and DELETE `Old Notes`?**"
     *   The human visually validates. They enter the password.
 4. **Resiliency to `kill -9` / Power Outages:** If the PC crashes right after `bw edit A` finishes but *before* `bw delete B`, the system restarts. The proxy detects the encrypted WAL, re-prompts for the Master Password, decrypts it, and executes `bw edit A (revert)` backwards, restoring pristine vault integrity.
-5. **Immutable Auditing:** All actions are finalized. A strict, **secret-scrubbed** JSON log (processed by `deep_scrub_payload`) is written to `~/.bw_mcp/logs/`. The Human can later inspect this via the bundled Typer CLI:
+5. **Immutable Auditing:** All actions are finalized. A strict, **secret-scrubbed** JSON log (processed by `deep_scrub_payload`) is written to `~/.bw/mcp/logs/`. The Human can later inspect this via the bundled Typer CLI:
 
 ```bash
 # View the last 5 transactions in a rich table

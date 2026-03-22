@@ -3,7 +3,7 @@ daemon.py — PID File Manager for BW-MCP server lifecycle control.
 
 Provides the primitives to write, read, clear, and check the PID of the
 running bw-mcp server process. The PID file is stored in the configured
-state directory (~/.bw_mcp/bw-mcp.pid by default).
+state directory (~/.bw/mcp/bw-mcp.pid by default).
 
 This mirrors the daemon management pattern used by nginx, redis, etc.
 """
@@ -18,7 +18,7 @@ def _pid_file_path() -> Path:
     from .config import load_config
     config = load_config()
     state_dir = Path(
-        config.get("proxy", {}).get("state_directory", "~/.bw_mcp")
+        config.get("proxy", {}).get("state_directory", "~/.bw/mcp")
     ).expanduser()
     state_dir.mkdir(parents=True, exist_ok=True)
     return state_dir / "bw-mcp.pid"
