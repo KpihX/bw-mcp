@@ -29,6 +29,27 @@ There are no "admin bypass" modes, no `--force` flags, and no silent failures.
 ### III. Radical Transparency
 We do not sell a dream. We document every architectural decision and **every limitation**. Our logs record not just what succeeded, but what failed, which rollback commands ran, and which one could not. You will always know the exact state of your vault.
 
+## 🛠️ Maintainer Entrypoint
+
+If you are an AI agent or a new developer taking over this project, here is your roadmap:
+
+### 1. The Core Engine (ACID & WAL)
+- **`src/bw_mcp/transaction.py`**: The Saga Pattern orchestrator. Manages the 3-phase commit (Simulate → Log → Execute → Rollback).
+- **`src/bw_mcp/wal.py`**: The Encrypted Write-Ahead Log implementation. Handles Fernet encryption and PBKDF2 key derivation.
+- **`src/bw_mcp/subprocess_wrapper.py`**: The raw interface to the `bw` CLI. Handles memory-safe password passing and RAM wiping.
+
+### 2. The Data Layer (Sanitization)
+- **`src/bw_mcp/models.py`**: Pydantic models for every Bitwarden entity. This is where `force_redact()` lives—our primary defense against PII leakage.
+- **`src/bw_mcp/scrubber.py`**: Recursive payload scrubbing for logs and error messages.
+
+### 3. The Server Interface
+- **`src/bw_mcp/server.py`**: FastMCP implementation. Defines the 5 tools and the server lifecycle.
+- **`src/bw_mcp/ui.py`**: Zenity-based Human-in-the-Loop dialogue system.
+
+### 4. Quality & Testing
+- **`tests/`**: 81+ tests covering transactions, redaction, and crash recovery. Always run `make test` before suggesting a commit.
+- **`docs/AUDIT.md`**: Read this to understand the established security invariant before modifying the data flow.
+
 **Notable limitations we cannot fix in code (but mitigate in design):**
 
 | Limitation                          | Root cause                                     | Our mitigation                                                   |

@@ -2,6 +2,17 @@
 
 All notable changes to this project, from its inception to the current secure state.
 
+## [v1.7.2] - 2026-04-22: Documentation & Maintainer Experience
+
+### 📖 Documentation
+- **Maintainer Entrypoint**: Added a clear high-level map to the `README.md` to help new agents and developers navigate the core engine (ACID/WAL), the data layer (Redaction), and the server interface.
+- **Operations Runbook**: Created `docs/OPERATIONS.md` covering the daemon lifecycle controller (`bw-mcp status/stop/restart`) and the WAL crash recovery flow.
+- **Veracity Audit**: Performed a full documentation audit against the live Python source and 81/81 test suite to ensure all architectural claims remain strictly accurate.
+
+### 🔧 Housekeeping
+- **Makefile Hardening**: Updated the `test` target to use `uv run python3 -m pytest -q` for better cross-environment compatibility and script resolution.
+- **TODO Cleanup**: Finalized and retired the "documentation enhancement" and "operator runbook" roadmap items.
+
 ## [v1.7.1] - 2026-03-22: WAL Security Hardening & Robustness Fixes
 
 ### 🔒 Security

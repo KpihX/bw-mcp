@@ -11,7 +11,7 @@ install:  ## Install package in editable mode
 	@uv tool install --editable .
 
 test:  ## Run pytest
-	@uv run pytest -q
+	@uv run python3 -m pytest -q
 
 check:  ## py_compile + pytest
 	@python3 -m py_compile $$(find src tests -name '*.py' 2>/dev/null)
