@@ -2,6 +2,18 @@
 
 All notable changes to this project, from its inception to the current secure state.
 
+## [v1.9.1] - 2026-04-23: Sovereign Hardening — Root-Owned Immutability
+
+### 🛡️ Security & Installation
+- **Sovereign Install Workflow**: Transitioned to a root-owned `/opt/bw-mcp` installation pattern with user-specific data directories (`~/.bw/mcp`) and binaries (`~/.local/bin`).
+- **Dynamic User Discovery**: Implemented `REAL_USER` and `REAL_HOME` logic in `Makefile` using `getent` and `SUDO_USER` to ensure correct path resolution when installed via `sui/sudo`.
+- **AppArmor Enforcement**: Automated the generation and loading of a restrictive AppArmor profile (`/etc/apparmor.d/opt.bw-mcp.bin.bw-mcp`) allowing access only to specific data and system resources.
+- **Unified Audit Target**: Added `make audit` for automated verification of installation ownerships, permissions, and security posture.
+
+### 🔧 Housekeeping
+- **Makefile Path Robustness**: Hardened `UV` path discovery and fixed `make check` execution logic (`uv run python3 -m pytest`).
+- **Data Dir Management**: Improved uninstallation logic to cleanly remove AppArmor profiles and user-specific data directories.
+
 ## [v1.9.0] - 2026-04-23: Blind Audit 2.0 — Total Vault Collision Scan
 
 ### 🆕 Features

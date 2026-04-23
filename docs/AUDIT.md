@@ -3,7 +3,7 @@
 > **Date:** 2026-03-02  
 > **Auditor:** Automated Deep-Scan (5-pass systematic review)  
 > **Scope:** All source files in `src/bw_mcp/`, all CLI commands, all LLM-facing tool outputs, all disk I/O, all RAM lifecycle.  
-> **Verdict:** ✅ **ZERO exploitable vulnerabilities identified.** 81/81 tests pass.
+> **Verdict:** ✅ **ZERO exploitable vulnerabilities identified.** 84/84 tests pass.
 
 ---
 
@@ -176,11 +176,11 @@ Permissions: chmod 600
 
 | Command               | Output                 | Protection                          | Status |
 | :-------------------- | :--------------------- | :---------------------------------- | :----- |
-| `bw-proxy logs`       | Log summary table      | Only metadata (no secrets)          | ✅      |
-| `bw-proxy log`        | Full log JSON          | Logs already scrubbed at write time | ✅      |
-| `bw-proxy wal`        | Decrypted WAL          | `deep_scrub_payload(wal_data)`      | ✅      |
-| `bw-proxy wal` (fail) | Error message          | Fixed string, no `str(e)`           | ✅      |
-| `bw-proxy purge`      | Deletion confirmations | No secret content                   | ✅      |
+| `bw-admin logs`       | Log summary table      | Only metadata (no secrets)          | ✅      |
+| `bw-admin log`        | Full log JSON          | Logs already scrubbed at write time | ✅      |
+| `bw-admin wal`        | Decrypted WAL          | `deep_scrub_payload(wal_data)`      | ✅      |
+| `bw-admin wal` (fail) | Error message          | Fixed string, no `str(e)`           | ✅      |
+| `bw-admin purge`      | Deletion confirmations | No secret content                   | ✅      |
 
 ### What stays in RAM
 
@@ -259,6 +259,7 @@ Every `str(e)` occurrence in the codebase was manually classified:
 | S3   | Incomplete Error Clean-up: `master_password` in `cli.py` could trigger ReferenceError on failed decryption | `cli.py:140,169`         | Added `if 'master_password' in locals()` to ensure safe cleaning in `finally` blocks.    |
 | B1   | `bw move` Syntax: Command failed due to missing encoded JSON for organization collections                  | `transaction.py:405`     | Implemented Base64 JSON-array encoding for `collection_ids` argument.                    |
 | B2   | Shadowing/Scoping: `import base64` inside closure caused `NameError` during rollback                       | `transaction.py:314,403` | Removed redundant local imports and moved all dependencies to module scope.              |
+| **1.9.1** | **Sovereign Pattern: Root-Owned Code, User-Owned Data**                                           | `Makefile`, `ui.py`      | Implemented `/opt/bw-mcp` install with AppArmor jail and strict `~/.bw/mcp` scoping.      |
 
 ---
 
@@ -340,7 +341,7 @@ The 480,000 iteration count transforms a 6-hour attack into a multi-century one.
 │  Secrets displayable to terminal:            0           │
 │  Injection vectors (command/path):           0           │
 │  Pydantic models without extra="forbid":     0 (writes)  │
-│  Tests passing:                              81/81       │
+│  Tests passing:                              84/84       │
 │                                                          │
 │  OVERALL STATUS:  ✅ PRODUCTION READY                    │
 └──────────────────────────────────────────────────────────┘

@@ -84,7 +84,7 @@ OUR GUARD: Pydantic rejects ANY batch containing delete_attachment alongside
 
 
 The transparency of this proxy is its greatest strength. Follow the **[Visual Simulation Path](docs/01_simulation_core_protocol.md)** to see every byte in motion.
-- [CHANGELOG.md](CHANGELOG.md): The historical evolution from v1.0.0 (Foundation) to v1.7.0 (Security Hardening).
+- [CHANGELOG.md](CHANGELOG.md): The historical evolution from v1.0.0 (Foundation) to v1.9.1 (Sovereign Hardening).
 
 ### 🎥 The Zero-Trust Interactive Path
 If you want to understand the codebase, read the documentation in this specific order:
@@ -727,7 +727,7 @@ Binary format: [16-byte salt][Fernet ciphertext (AES-128-CBC + HMAC-SHA256)]
 Permissions:   chmod 600 (owner-only read/write)
 Decryption:    Requires the same Master Password used during the transaction.
 ```
-To inspect a stranded WAL, use the CLI: `uv run bw-proxy wal` (prompts for Master Password, displays scrubbed content).
+To inspect a stranded WAL, use the CLI: `bw-admin wal` (prompts for Master Password, displays scrubbed content).
 
 ---
 
@@ -735,51 +735,43 @@ To inspect a stranded WAL, use the CLI: `uv run bw-proxy wal` (prompts for Maste
 
 Requires Python 3.12+ and `uv`.
 
-#### Recommended: Install via `uv tool` (PyPI)
-This installs the proxy in an isolated environment and makes the `bw-mcp` command available globally.
-```bash
-uv tool install bw-mcp
-```
+### 🛡️ Sovereign Hardened Installation (Recommended)
+This is the production standard for KpihX-compliant environments. The source code is installed into `/opt/bw-mcp` with `root:root` ownership, while data and configs are isolated in the user's home with strict permissions.
 
-#### Alternative: Install from source
 ```bash
+# 1. Clone the repo
 git clone https://github.com/KpihX/bw-mcp.git
 cd bw-mcp
-uv sync
-uv tool install .
+
+# 2. Perform the sovereign install (requires sui/sudo for /opt/ and AppArmor)
+sui make install
+
+# 3. Verify the installation security
+make audit
 ```
 
-### 🖥️ Native Auditing CLI (`bw-proxy`)
+### 🖥️ Native Auditing CLI (`bw-admin`)
 
 The proxy features an underlying auditor capturing every structural modification intent.
 
 ```bash
 # View a table of the 5 most recent transactions
-uv run bw-proxy log view -l 5
+bw-admin log view -l 5
 
 # View the FULL JSON details of the most recent transaction (index 1)
-uv run bw-proxy log view -n 1
+bw-admin log view -n 1
 
 # Delete old logs, keeping only the 10 most recent ones
-uv run bw-proxy log purge -k 10
+bw-admin log purge -k 10
 
 # Inspect the full Write-Ahead Log state (Requires Master Password)
-uv run bw-proxy wal view
+bw-admin wal view
 
 # Delete the Write-Ahead Log to force-clear stranded transactions (Requires Master Password)
-uv run bw-proxy wal delete
+bw-admin wal delete
 
 # View full configuration
-uv run bw-proxy config get
-
-# Get specific config value (Batch size)
-uv run bw-proxy config get --max-batch-size
-
-# Update specific config value
-uv run bw-proxy config update --max-batch-size 15
-
-# Check version
-uv run bw-proxy --version
+bw-admin config get
 ```
 
 ### ⚙️ Daemon Lifecycle CLI (`bw-mcp`)
@@ -794,7 +786,7 @@ bw-mcp status
 # Stop a running server cleanly via SIGTERM
 bw-mcp stop
 
-# Restart the server (Useful after 'uv tool install --force' to load new bytecode)
+# Restart the server (Useful after 'sui make install' to load new bytecode)
 # The MCP client will automatically respawn it on the next query.
 bw-mcp restart
 

@@ -7,3 +7,4 @@
 - [x] Enhance Audit HITL UI with item names and rich Zenity formatting.
 - [x] Refactor and unify Audit Engine logic in `server.py` and `subprocess_wrapper.py`.
 - [x] Integrate `check_recovery` and `Password-First` logic into all audit entrypoints (v1.9.0 finalization).
+- [x] Standardize Sovereign root-owned installation with AppArmor confinement and user-side data parity (v1.9.1).

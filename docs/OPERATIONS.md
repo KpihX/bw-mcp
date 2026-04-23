@@ -44,10 +44,10 @@ Simply performing ANY read or write operation (e.g., `get_vault_map`) will trigg
 If automatic recovery fails or you want to see what's inside the WAL:
 ```bash
 # View the scrubbed content of the WAL
-uv run bw-proxy wal view
+bw-admin wal view
 
 # Force delete the WAL (WARNING: Vault might remain in inconsistent state)
-uv run bw-proxy wal delete
+bw-admin wal delete
 ```
 
 ---
@@ -60,4 +60,4 @@ If you are running in a headless environment (SSH without X-forwarding), Zenity 
 
 ### "Item not found" during rollback
 This happens if you modified an item via another Bitwarden client (Mobile, Web) during the short window of an MCP transaction.
-**Fix:** The WAL will be preserved. Use `bw-proxy log view` to see the `failed_rollback` payload and manually fix the item in the Bitwarden Web Vault.
+**Fix:** The WAL will be preserved. Use `bw-admin log view` to see the `failed_rollback` payload and manually fix the item in the Bitwarden Web Vault.
