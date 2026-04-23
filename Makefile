@@ -5,7 +5,9 @@ PKG_DIR  := src/bw_mcp
 # 🛠️ Robust path discovery (detecting real user home even under sudo/sui)
 REAL_USER := $(if $(SUDO_USER),$(SUDO_USER),$(USER))
 REAL_HOME := $(shell getent passwd $(REAL_USER) | cut -d: -f6)
+ZSH_LOGIN := zsh -l -c
 UV        := $(shell command -v uv 2>/dev/null || ls $(REAL_HOME)/.local/bin/uv 2>/dev/null || echo uv)
+APPARMOR_TARGET := /etc/apparmor.d/opt.bw-mcp.bin.bw-mcp
 
 help:  ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | \
