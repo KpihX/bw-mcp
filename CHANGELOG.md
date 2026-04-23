@@ -2,7 +2,7 @@
 
 All notable changes to this project, from its inception to the current secure state.
 
-## [v1.9.1] - 2026-04-23: Sovereign Hardening — Root-Owned Immutability
+## [v1.9.2] - 2026-04-23: Sovereign Hardening — Root-Owned Immutability
 
 ### 🛡️ Security & Installation
 - **Sovereign Install Workflow**: Transitioned to a root-owned `/opt/bw-mcp` installation pattern with user-specific data directories (`~/.bw/mcp`) and binaries (`~/.local/bin`).

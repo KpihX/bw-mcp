@@ -1,6 +1,6 @@
 [project]
 name = "bw-mcp"
-version = "1.9.1"
+version = "1.9.2"
 description = "A sovereign MCP server acting as a security-hardened blind proxy between LLMs and the Bitwarden CLI. Zero Trust · Total Transparency · Total Blind."
 readme = "README.md"
 authors = [
