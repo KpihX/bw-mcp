@@ -5,7 +5,8 @@ import base64
 from typing import List, Dict, Any, Callable, Tuple, Optional
 from .models import (
     TransactionPayload, VaultTransactionAction, ItemAction, 
-    FolderAction, EditAction, TransactionStatus, SecretFieldTarget
+    FolderAction, EditAction, TransactionStatus, SecretFieldTarget,
+    RefactorAction, RefactorScope
 )
 from .subprocess_wrapper import SecureSubprocessWrapper, SecureBWError, _sanitize_args_for_log, _safe_error_message
 from .ui import HITLManager
@@ -302,6 +303,123 @@ class TransactionManager:
         return id_to_name
 
     @staticmethod
+    def _execute_refactor_action(op: Any, session_key: bytearray) -> Tuple[str, Optional[List[Dict[str, Any]]]]:
+        """
+        Executes a secure, blind refactoring operation.
+        Internal data manipulation is hidden from the MCP tool level.
+        """
+        # 1. Fetch Source
+        source_item = SecureSubprocessWrapper.get_item_raw(op.source_item_id, session_key)
+        source_orig = copy.deepcopy(source_item)
+        
+        # 2. Extract Value
+        secret_value = None
+        
+        if op.scope == RefactorScope.FIELD:
+            fields = source_item.get("fields", [])
+            found_idx = -1
+            for i, f in enumerate(fields):
+                if f.get("name") == op.key:
+                    secret_value = f.get("value")
+                    found_idx = i
+                    break
+            
+            if found_idx != -1 and op.refactor_action in [RefactorAction.MOVE, RefactorAction.DELETE]:
+                fields.pop(found_idx)
+                source_item["fields"] = fields
+        
+        elif op.scope == RefactorScope.LOGIN_USER:
+            secret_value = source_item.get("login", {}).get("username")
+            if op.refactor_action in [RefactorAction.MOVE, RefactorAction.DELETE]:
+                if "login" in source_item:
+                    source_item["login"]["username"] = None
+        
+        elif op.scope == RefactorScope.LOGIN_PASS:
+            secret_value = source_item.get("login", {}).get("password")
+            if op.refactor_action in [RefactorAction.MOVE, RefactorAction.DELETE]:
+                if "login" in source_item:
+                    source_item["login"]["password"] = None
+        
+        elif op.scope == RefactorScope.LOGIN_TOTP:
+            secret_value = source_item.get("login", {}).get("totp")
+            if op.refactor_action in [RefactorAction.MOVE, RefactorAction.DELETE]:
+                if "login" in source_item:
+                    source_item["login"]["totp"] = None
+        
+        elif op.scope == RefactorScope.NOTE:
+            secret_value = source_item.get("notes")
+            if op.refactor_action in [RefactorAction.MOVE, RefactorAction.DELETE]:
+                source_item["notes"] = None
+
+        if secret_value is None and op.refactor_action != RefactorAction.DELETE:
+            raise SecureBWError(f"Refactor Error: Source field '{op.scope}.{op.key}' not found or empty in item {op.source_item_id}.")
+
+        # 3. Handle COPY/MOVE injection
+        dest_orig = None
+        dest_item = None
+        if op.refactor_action in [RefactorAction.MOVE, RefactorAction.COPY]:
+            if not op.dest_item_id:
+                raise SecureBWError("Refactor Error: dest_item_id is required for MOVE/COPY operations.")
+            
+            dest_key = op.dest_key or op.key
+            
+            if op.dest_item_id == op.source_item_id:
+                dest_item = source_item # Pointer to same dict (modified in-place)
+                dest_item_id = op.source_item_id
+            else:
+                dest_item = SecureSubprocessWrapper.get_item_raw(op.dest_item_id, session_key)
+                dest_orig = copy.deepcopy(dest_item)
+                dest_item_id = op.dest_item_id
+            
+            # Injection Logic
+            if op.scope == RefactorScope.FIELD:
+                d_fields = dest_item.setdefault("fields", [])
+                found = False
+                for f in d_fields:
+                    if f.get("name") == dest_key:
+                        f["value"] = secret_value
+                        found = True
+                        break
+                if not found:
+                    d_fields.append({"name": dest_key, "value": secret_value, "type": 0})
+            
+            elif op.scope == RefactorScope.LOGIN_USER:
+                dest_item.setdefault("login", {})["username"] = secret_value
+            
+            elif op.scope == RefactorScope.LOGIN_PASS:
+                dest_item.setdefault("login", {})["password"] = secret_value
+            
+            elif op.scope == RefactorScope.LOGIN_TOTP:
+                dest_item.setdefault("login", {})["totp"] = secret_value
+            
+            elif op.scope == RefactorScope.NOTE:
+                dest_item["notes"] = secret_value
+
+        # 4. Commit & Rollback Preparation
+        rollback_cmds = []
+        
+        # A. Edit Source (Source is always edited for MOVE/DELETE, or even COPY if we updated source_item object)
+        src_payload = base64.b64encode(json.dumps(source_item).encode()).decode()
+        SecureSubprocessWrapper.execute(["edit", "item", op.source_item_id, src_payload], session_key)
+        
+        src_orig_b64 = base64.b64encode(json.dumps(source_orig).encode()).decode()
+        rollback_cmds.append({"cmd": ["bw", "edit", "item", op.source_item_id, src_orig_b64]})
+        
+        # B. Edit Destination (Only if different from source)
+        if dest_item and op.dest_item_id != op.source_item_id:
+            dst_payload = base64.b64encode(json.dumps(dest_item).encode()).decode()
+            SecureSubprocessWrapper.execute(["edit", "item", op.dest_item_id, dst_payload], session_key)
+            
+            dst_orig_b64 = base64.b64encode(json.dumps(dest_orig).encode()).decode()
+            rollback_cmds.append({"cmd": ["bw", "edit", "item", op.dest_item_id, dst_orig_b64]})
+            
+        msg = f"-> Refactored ({op.refactor_action}) {op.scope}.{op.key} from {op.source_item_id}"
+        if op.dest_item_id:
+            msg += f" to {op.dest_item_id} (key: {op.dest_key or op.key})"
+            
+        return msg, rollback_cmds
+
+    @staticmethod
     def _execute_single_action(op: VaultTransactionAction, session_key: bytearray) -> Tuple[str, Optional[List[Dict[str, Any]]]]:
         
         # Helper to encapsulate the common get -> edit cycle safely
@@ -528,5 +646,8 @@ class TransactionManager:
             _, rollback_cmds = safe_edit_item(op.target_id, u)
             return f"-> Upserted custom field '{op.name}' for item {op.target_id}", rollback_cmds
             
+        elif op.action == EditAction.REFACTOR:
+            return TransactionManager._execute_refactor_action(op, session_key)
+
         else:
             raise ValueError(f"CRITICAL: Unhandled polymorphic action type: {op.action}")

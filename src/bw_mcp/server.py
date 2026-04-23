@@ -200,6 +200,7 @@ def propose_vault_transaction(rationale: str, operations: List[Dict[str, Any]]) 
           13. "edit_item_card" -> Requires: target_id, and optional 'cardholderName', 'brand', 'expMonth', 'expYear'. 
           14. "edit_item_identity" -> Requires: target_id, and optional 'title', 'firstName', 'email', 'phone', etc.
           15. "upsert_custom_field" -> Requires: target_id (str), name (str), value (str), type (int: 0 for Text, 2 for Boolean).
+          16. "vault_refactor" -> Requires: refactor_action ("move", "copy", "delete"), source_item_id, scope ("field", "user", "pass", "totp", "note"), key. Optional: dest_item_id, dest_key.
           
           Note: YOU CANNOT PASS SENSITIVE FIELDS ('password', 'totp', 'number', 'code', 'ssn', 'value' of hidden fields). ATTEMPTING TO DO SO WILL FAIL VALIDATION.
           
@@ -597,6 +598,37 @@ def find_all_vault_duplicates(payload: Annotated[FindAllDuplicatesPayload, "The 
             for i in range(len(master_password)):
                 master_password[i] = 0
             del master_password
+
+@mcp.tool()
+def refactor_item_secrets(
+    rationale: str,
+    operations: List[Dict[str, Any]]
+) -> str:
+    """
+    BLIND REFACTORING: Move, Copy, or Delete secret fields between items securely.
+    The secret values are NEVER exposed to you (the LLM). 
+    Use this to migrate passwords to different items, move common keys to a shared item,
+    or clean up legacy fields without ever knowing the actual secret.
+
+    [🛡️ ACID SAFETY]
+    Refactoring is integrated into the transaction engine. A rollback restores both
+    the source and destination items if any operation in the batch fails.
+
+    [🔢 OPERATIONS]
+    Each operation must have:
+      - "action": "vault_refactor"
+      - "refactor_action": "move", "copy", or "delete"
+      - "source_item_id": UUID of the source item.
+      - "scope": "field" (custom field), "user", "pass", "totp", or "note".
+      - "key": Field name (for 'field' scope) or identifier.
+      - "dest_item_id": (Required for MOVE/COPY) UUID of the target item.
+      - "dest_key": (Optional) Rename the field in the destination.
+    """
+    payload = {
+        "rationale": rationale,
+        "operations": operations
+    }
+    return TransactionManager.execute_batch(payload)
 
 def main():
     """Entry point for the script."""

@@ -44,6 +44,43 @@ class EditAction(StrEnum):
     CARD = "edit_item_card"
     IDENTITY = "edit_item_identity"
     CUSTOM_FIELD = "upsert_custom_field"
+    REFACTOR = "vault_refactor"
+
+
+class RefactorAction(StrEnum):
+    MOVE = "move"
+    COPY = "copy"
+    DELETE = "delete"
+
+
+class RefactorScope(StrEnum):
+    FIELD = "field"  # Custom fields
+    LOGIN_USER = "user"  # login.username
+    LOGIN_PASS = "pass"  # login.password
+    LOGIN_TOTP = "totp"  # login.totp
+    NOTE = "note"  # notes
+
+
+class BaseAction(BaseModel):
+    """Common base for all transaction actions."""
+    model_config = ConfigDict(extra="ignore")
+    action: str
+    rationale: Optional[str] = Field(None, description="Explanation for this specific operation.")
+
+
+class RefactorOperation(BaseAction):
+    """
+    Secure Refactor Operation.
+    Allows moving/copying secrets between items without exposing values to the AI.
+    """
+    action: Literal[EditAction.REFACTOR] = EditAction.REFACTOR
+    refactor_action: RefactorAction
+    source_item_id: str
+    scope: RefactorScope
+    key: str = Field(description="Field name or scope-specific key (e.g. 'password')")
+
+    dest_item_id: Optional[str] = None
+    dest_key: Optional[str] = None
 
 # SECURITY: Whitelist of allowed top-level namespaces for secret audit pathing.
 ALLOWED_NAMESPACES = ["login", "card", "identity", "fields", "notes", "secureNote"]
@@ -398,7 +435,8 @@ VaultTransactionAction = Annotated[
         EditItemLoginAction,
         EditItemCardAction,
         EditItemIdentityAction,
-        UpsertCustomFieldAction
+        UpsertCustomFieldAction,
+        RefactorOperation
     ],
     Field(discriminator="action")
 ]

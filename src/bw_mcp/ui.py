@@ -145,6 +145,11 @@ class HITLManager:
             val_str = html.escape(str(op.value)) if op.value is not None else ""
             return f"🏷️ UPSERT FIELD {resolve(op.target_id)} -> [{t_str}] '{html.escape(op.name)}' = '{val_str}'"
             
+        elif op.action == EditAction.REFACTOR:
+            dest = f" -> {resolve(op.dest_item_id)} (key: {html.escape(op.dest_key or op.key)})" if op.dest_item_id else ""
+            icon = {"move": "🚚 MOVE", "copy": "📋 COPY", "delete": "💥 DELETE"}.get(op.refactor_action, "⚙️ REFACTOR")
+            return f"{icon} SECRET {html.escape(op.scope)} '{html.escape(op.key)}' from {resolve(op.source_item_id)}{dest}"
+            
         return f"❓ UNKNOWN ACTION: {op.action}"
 
     @staticmethod
@@ -158,9 +163,14 @@ class HITLManager:
             for i, op in enumerate(payload.operations, 1)
         )
         
-        from .models import ItemAction, FolderAction
+        from .models import ItemAction, FolderAction, RefactorAction, EditAction
         # Check for destructive operations using Enums instead of hardcoded strings
-        has_destructive = any(op.action in [ItemAction.DELETE, ItemAction.DELETE_ATTACHMENT, FolderAction.DELETE] for op in payload.operations)
+        # MOVES (Refactor) are also considered destructive on the source side.
+        has_destructive = any(
+            op.action in [ItemAction.DELETE, ItemAction.DELETE_ATTACHMENT, FolderAction.DELETE] or 
+            (op.action == EditAction.REFACTOR and op.refactor_action in [RefactorAction.MOVE, RefactorAction.DELETE])
+            for op in payload.operations
+        )
         
         if has_destructive:
             # dialog_type is always --question for Yes/No semantics.

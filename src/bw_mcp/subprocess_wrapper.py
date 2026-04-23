@@ -174,31 +174,44 @@ class SecureSubprocessWrapper:
         The session key is passed via environment variable and immediately scrubbed.
         """
         env = os.environ.copy()
-        env[BW_SESSION_ENV] = session_key.decode('utf-8')
-        
+        env[BW_SESSION_ENV] = session_key.decode("utf-8")
+
         cmd = ["bw"] + args
-        
+
         try:
             result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                env=env,
-                check=False
+                cmd, capture_output=True, text=True, env=env, check=False
             )
-            
+
             if result.returncode != 0:
                 # We do NOT expose stderr to the LLM agent to prevent data leakage.
                 # Use structural redaction: only whitelisted tokens survive.
                 raise SecureBWError(f"Bitwarden command {_sanitize_args_for_log(args)} failed.")
-                
+
             return result.stdout.strip()
-            
+
         finally:
             # Wipe environment variable and memory
             if BW_SESSION_ENV in env:
                 env[BW_SESSION_ENV] = "DEADBEEF" * 20
                 del env[BW_SESSION_ENV]
+
+    @staticmethod
+    def get_item_raw(uuid: str, session_key: bytearray) -> dict:
+        """
+        Retrieves the full, unredacted JSON for a specific item.
+        INTERNAL USE ONLY: Never expose this dict to the MCP tool response.
+        """
+        return SecureSubprocessWrapper.execute_json(["get", "item", uuid], session_key)
+
+    @staticmethod
+    def edit_item_raw(uuid: str, item_data: dict, session_key: bytearray) -> str:
+        """
+        Edits an item using a direct JSON payload.
+        """
+        import base64
+        payload = base64.b64encode(json.dumps(item_data).encode("utf-8")).decode("utf-8")
+        return SecureSubprocessWrapper.execute(["edit", "item", uuid, payload], session_key)
 
     @staticmethod
     def execute_json(args: List[str], session_key: bytearray) -> dict | list:

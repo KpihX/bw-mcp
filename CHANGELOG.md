@@ -2,6 +2,21 @@
 
 All notable changes to this project, from its inception to the current secure state.
 
+## [v2.0.0-rc1] - 2026-04-23: Blind Refactoring — v2.0 Foundation
+
+### 🆕 Features
+- **Blind Refactoring Tool (`refactor_item_secrets`)**: Introduced a breakthrough tool for secure `MOVE`, `COPY`, and `DELETE` of secrets between vault items.
+- **AI-Blind Secret Migration**: Allows the AI to reorganize secret fields (passwords, TOTPs, custom fields) by key/name without ever seeing the values.
+- **Deep Object Manipulation**: Support for refactoring Login credentials (username/password), Secure Notes, and arbitrary Custom Fields.
+
+### 🔒 Security & ACID Compliance
+- **Transactional Refactoring**: Integrated the refactor engine into the ACID transaction manager. Every move/copy is logged in the Write-Ahead Log (WAL) and supports full LIFO rollback.
+- **HITL Transparency**: Updated the Zenity UI with distinct icons (🚚, 📋, 💥) and human-readable resolution of source/destination items.
+- **Destructive Warning System**: Automatic "RED ALERT" triggers on the item source for `MOVE` and `DELETE` operations.
+
+### 🧪 Test Coverage
+- **Refactoring Test Suite**: Added `tests/test_refactor.py` covering item-to-item migration and multi-operation batches.
+
 ## [v1.9.2] - 2026-04-23: Sovereign Hardening — Root-Owned Immutability
 
 ### 🛡️ Security & Installation
@@ -52,6 +67,7 @@ All notable changes to this project, from its inception to the current secure st
 - **Dry/Redundancy Cleanup**: Removed 150+ lines of duplicate logic and redundant internal helper functions in `server.py`.
 - **Refactoring Verification**: Successfully validated against a full 84/84 test suite passing in 3.63s.
 
+## [v1.8.0] - 2026-04-22: Blind Duplicate Scanner — AI-Blind Audit v2.0
 
 ### 🆕 Features
 - **Blind Duplicate Scanner**: Introduced `find_item_duplicates` tool. Allows the AI to scan the entire vault (or a candidate list) for items sharing the same secret as a target item. Performed in a single, high-speed ephemeral subprocess.
@@ -98,6 +114,7 @@ All notable changes to this project, from its inception to the current secure st
 - Doc fixes in `README.md` and `docs/`.
 
 ## [v1.7.0] - 2026-03-02: Security Hardening & Robustness Audit
+
 ### 🔒 Security
 - **DoS Prevention (Search Truncation)**: Implemented strict 256-character truncation for all search strings (`search_items`, `search_folders`) in `get_vault_map`. Prevents Memory/CPU exhaustion from malicious LLM-generated payloads.
 - **Defense-in-Depth Audit Validation**: `audit_compare_secrets` now performs a secondary, internal validation of `SecretFieldTarget` before subprocess dispatch, ensuring malformed or smuggled field paths cannot be compared.
@@ -114,10 +131,12 @@ All notable changes to this project, from its inception to the current secure st
 - **Coverage Bump**: Global test coverage increased to **69%**, with core logic reaching **75%+**.
 
 ## [v1.6.1] - 2026-03-02: Critical Security Patch (Secret Context Scrubbing)
+
 ### 🔒 Security
 - **Patched Early-Exit Secret Leak**: Fixed a catastrophic memory leak in `execute_batch` and `get_vault_map` where an early exception (e.g., incorrect Master Password, or Zenity abort) would bypass the `finally` block preventing the memory-scrubbing loop (`for i in range(len(session_key)): session_key[i] = 0`). The entire logic was refactored into a unified master `try...finally` block.
 
 ## [v1.6.0] - 2026-03-02: Blind Secret Comparator (AI-Blind Audit Primitive)
+
 ### 🆕 Features
 - **`compare_secrets_batch` Tool**: New MCP tool allowing the LLM to compare secret fields (passwords, TOTPs, SSNs, card numbers, custom hidden fields) between vault items without EVER seeing the values. Returns only `MATCH` / `MISMATCH`.
 - **`SecretFieldTarget` StrEnum**: Strict Pydantic-enforced whitelist of auditable secret paths (`login.password`, `login.totp`, `card.number`, `card.code`, `identity.ssn`, `identity.passportNumber`, `identity.licenseNumber`, `fields.VALUE`).
@@ -135,18 +154,21 @@ All notable changes to this project, from its inception to the current secure st
 - **Config-driven audit tags**: `MATCH` / `MISMATCH` verdicts loaded from `config.yaml → audit.match_tag / audit.mismatch_tag`.
 
 ## [v1.5.1] - 2026-03-02: UI Transparency Hotfix (Zero-Trust Audit)
+
 ### 🔒 Security / UI
 - **Patched URI Blindspot**: Removed the "pretty URI" formatter in `ui.py` that was silently stripping match strategy from Bitwarden URIs (e.g., `match=5 → Regex`). Zenity now displays the full raw list payload (`str(v)`) with zero reformatting.
 - **Config-driven Redaction Check**: Replaced hardcoded `"[REDACTED"` substring check with a strict equality check against `REDACTED_POPULATED` and `REDACTED_EMPTY` from `config.py`. Single Source of Truth restored.
 - **100% Transparent `_format_operation`**: Every field the LLM sends — URIs with match strategies, identity fields, card expiry, custom field values — is now shown verbatim to the human operator in Zenity before approval.
 
 ## [v1.5.0] - 2026-03-02: Native Schema Templates (Resources & Tools)
+
 ### 🧠 AI Contextualization
 - **Pydantic Driven Templates**: Introduced `TemplateType` (StrEnum) in `models.py` to firmly structure the Bitwarden template types exposed to the LLM context.
 - **`get_bitwarden_template` Tool**: Added a native MCP tool for the AI to securely fetch JSON schemas of Bitwarden entities (login, card, identity, etc.), automatically scrubbed of sensitive fields by the proxy.
 - **Dynamic Resources**: Exposed `bw://templates/{template_type}` as MCP resources for host applications, allowing human operators to inject clean Bitwarden schemas directly into the prompt without a tool execution round-trip.
 
 ## [v1.4.3] - 2026-03-02: Structured CLI Configuration & Versioning
+
 ### ⚙️ Proxy Control
 - **Refactored Config CLI**: Split `bw-proxy config` into explicit `get` and `update` subcommands for a more standard CLI experience.
 - **Config Get**: Added `bw-proxy config get` to view the full YAML-derived JSON, or `bw-proxy config get -m` to strictly fetch the current batch limit.
@@ -154,23 +176,27 @@ All notable changes to this project, from its inception to the current secure st
 - **Native Versioning**: Added `--version` flag to the `bw-proxy` CLI to match the behavior of `bw-mcp version`.
 
 ## [v1.4.2] - 2026-03-02: CLI Configuration Management
+
 ### ⚙️ Proxy Control
 - **Dynamic Configuration**: Introduced `bw-proxy config` command to view and programmatically update the proxy's `config.yaml` from the CLI.
 - **Batch Size adjustment**: Added `-m / --max-batch-size` option to allow users to tune the ACID engine's risk window without manual YAML editing. Includes integer validation (>= 1).
 - **Atomic Config Write**: Implemented `update_config` with clean disk-load and `load_config.cache_clear()` to prevent race conditions during configuration updates.
 
 ## [v1.4.0] - 2026-03-02: Zero-Trust Auto-Sync Architecture
-### 🔄 Silent Synchronization 
+
+### 🔄 Silent Synchronization
 - **Architectural Shift**: Removed the `sync_vault` MCP tool. Instead, the proxy now enforces a strict `bw sync` operation securely under-the-hood within `SecureSubprocessWrapper.unlock_vault()` immediately after decrypting the session key.
 - **Guarantee**: Every `get_vault_map` and every transaction execution is now categorically guaranteed to query the latest server truth, eliminating races with external vault edits entirely and removing cognitive load from the LLM.
 
 ## [v1.3.2] - 2026-03-01: Entity Validation & Pydantic StrEnum Fixes
+
 ### 🛡️ Security & Type Hardening
 - **Active Type-Checking**: Fixed a critical validation bypass where Pydantic's underlying `str` casting of `StrEnum` models circumvented our `type(op.action)` checks. The proxy now strictly intercepts AI hallucinations (e.g., trying to `move_item` on a Folder UUID) *before* the Zenity UI appears and *before* the WAL is written.
 - **Clean LLM Bounce-back**: By securely wrapping the intercepted payload errors in `SecureBWError` (with `_safe_error_message`), the agent now receives a direct, scrubbed rationale explaining its structural mistake, allowing auto-correction without disk mutation or human UI spam.
 - **New Test Coverage**: Expanded `test_transactions.py` with mock-based validation assertions to prevent similar architectural illusions in future updates.
 
 ## [v1.3.1] - 2026-03-01: The Daemon Evolution & Batch Upgrade
+
 ### ⚙️ Daemon Lifecycle Control
 - **Typer CLI Overhaul**: Refactored the core `bw-mcp` entry point (`__init__.py` -> `main.py`) from a bare `main()` into a fully-fledged Typer CLI with systemd-like daemon controls.
 - **PID File Management**: Created `daemon.py` to manage a stateful `~/.bw/mcp/bw-mcp.pid` tracking the live FastMCP stdio process.
@@ -190,17 +216,20 @@ All notable changes to this project, from its inception to the current secure st
 - **Increased Batch Capacity**: Raised `max_batch_size` default limit in `config.yaml` from 10 to 25 operations to support heavier automated vault organization scripts without fragmentation.
 
 ## [v1.2.3] - 2026-03-01: UI Security & Pango Immunity
+
 ### 🔒 UI Hardening
 - **Pango Markup Escaping**: Implemented systematic XML/HTML escaping for all strings displayed in Zenity popups. This prevents UI crashes or blank dialogs when vault items or rationales contain special characters like `&`, `<`, or `>`.
 - **Bulletproof HITL**: Added unit tests specifically for character escaping in the UI layer.
 
 ## [v1.2.2] - 2026-03-01: CLI Polish & UI Aliases
+
 ### 🔧 CLI Improvements
 - **Aliased Purge**: Added `-k` and `--keep` aliases for the `purge` command for faster log management.
 - **Robust Error Catching**: Refined the CLI entry point to catch `ValueError` and `SecureProxyError` explicitly, preventing raw stack traces from reaching the user while maintaining diagnostic clarity.
 - **Version Bump**: Synced project version to 1.2.1.
 
 ## [v1.2.0] - 2026-03-01: The Ironclad Hardening
+
 ### 🔒 Security & Cryptography
 - **Encrypted WAL**: Transitioned from plaintext `.json` to encrypted `.wal` format using **Fernet (AES-128-CBC + HMAC)**.
 - **Key Derivation**: Implemented **PBKDF2-HMAC-SHA256** with 480,000 iterations and 16-byte cryptographic salts for WAL security.
@@ -215,6 +244,7 @@ All notable changes to this project, from its inception to the current secure st
 - **Full Security Audit**: Created `AUDIT.md` documenting the 6 layers of defense-in-depth.
 
 ## [v1.1.0] - 2026-02-28: ACID Resilience & Durability
+
 ### ✨ Features
 - **ACID Transaction Engine**: Implementation of the 3-phase commit engine (Virtual Vault RAM Simulation → Encrypted WAL → LIFO Rollback).
 - **Idempotent Rollback**: Redesigned the WAL to consume commands incrementally, preventing double-application during recovery crashes.
@@ -226,6 +256,7 @@ All notable changes to this project, from its inception to the current secure st
 - **Simulation Series**: Created a 01-08 walkthrough series detailing every core mechanism from protocol to WAL resilience.
 
 ## [v1.0.0] - 2026-02-28: Total-Blind Foundation
+
 ### 🧱 Core Infrastructure
 - **MCP Server Architecture**: Initial deployment using `FastMCP`.
 - **Blind Schemas**: Pydantic models defining the "Total Blind" philosophy (secrets are redacted before reaching the LLM).

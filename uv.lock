@@ -44,7 +44,7 @@ wheels = [
 
 [[package]]
 name = "bw-mcp"
-version = "1.9.1"
+version = "2.0.0rc1"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },

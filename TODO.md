@@ -8,3 +8,4 @@
 - [x] Refactor and unify Audit Engine logic in `server.py` and `subprocess_wrapper.py`.
 - [x] Integrate `check_recovery` and `Password-First` logic into all audit entrypoints (v1.9.0 finalization).
 - [x] Standardize Sovereign root-owned installation with AppArmor confinement and user-side data parity (v1.9.1).
+- [x] Implement Blind Refactoring Tool (`refactor_item_secrets`) for secure Move/Copy/Delete of secrets (v2.0.0 prep).
