@@ -2,6 +2,8 @@
 
 - [x] Add a short operator runbook for the daemon lifecycle and WAL recovery flow.
 - [x] Add a concise maintainer entrypoint section to the README so a new agent knows which `docs/` files to read first.
-- [ ] Review whether the root `AGENT.md` should eventually be slimmed to match the newer `.agent/AGENT.md` handoff style.
-- [ ] HTTP transport layer — expose bw-mcp over streamable-HTTP for homelab deployment (Traefik), following the tick-mcp/whats-mcp pattern.
-- [ ] Telegram admin bridge — `/status`, `/wal`, `/recover` commands via a configured bot, same pattern as whats-mcp.
+- [x] Implement Blind Audit 2.0: Dynamic pathing (`fields.*`, `notes`, `uris`) and cross-namespace comparison.
+- [x] Implement Blind Duplicate Scanner tools (`find_item_duplicates`, `find_all_vault_duplicates`) for vault-wide maintenance.
+- [x] Enhance Audit HITL UI with item names and rich Zenity formatting.
+- [x] Refactor and unify Audit Engine logic in `server.py` and `subprocess_wrapper.py`.
+- [x] Integrate `check_recovery` and `Password-First` logic into all audit entrypoints (v1.9.0 finalization).

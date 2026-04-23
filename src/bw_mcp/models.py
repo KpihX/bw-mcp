@@ -1,7 +1,10 @@
 from enum import StrEnum
 from typing import List, Optional, Any, Dict, Literal, Union, Annotated, Callable, Tuple
-from pydantic import BaseModel, ConfigDict, Field, model_validator
-from .config import load_config, REDACTED_POPULATED, REDACTED_EMPTY, MAX_BATCH_SIZE
+from pydantic import BaseModel, ConfigDict, Field, model_validator, field_validator
+from .config import (
+    load_config, REDACTED_POPULATED, REDACTED_EMPTY, 
+    MAX_BATCH_SIZE, MAX_AUDIT_SCAN_SIZE, MAX_AUDIT_SCAN_CEILING
+)
 
 # -----------------
 # ACTION ENUMERATIONS (CENTRALIZATION)
@@ -42,8 +45,11 @@ class EditAction(StrEnum):
     IDENTITY = "edit_item_identity"
     CUSTOM_FIELD = "upsert_custom_field"
 
+# SECURITY: Whitelist of allowed top-level namespaces for secret audit pathing.
+ALLOWED_NAMESPACES = ["login", "card", "identity", "fields", "notes", "secureNote"]
+
 class SecretFieldTarget(StrEnum):
-    """Target keys for secret value comparison (AI-Blind Audit)."""
+    """Common target keys for secret value comparison. Dynamic paths like fields.NAME are supported too."""
     LOGIN_PASSWORD = "login.password"
     LOGIN_TOTP = "login.totp"
     CARD_NUMBER = "card.number"
@@ -51,7 +57,9 @@ class SecretFieldTarget(StrEnum):
     IDENTITY_SSN = "identity.ssn"
     IDENTITY_PASSPORT = "identity.passportNumber"
     IDENTITY_LICENSE = "identity.licenseNumber"
-    CUSTOM_FIELD = "fields.VALUE" # Needs custom_name to resolve the target
+    NOTES = "notes"
+    URIS = "login.uris"
+    FIELDS_VALUE = "fields.VALUE" # Legacy support
 
 class TransactionStatus(StrEnum):
     SUCCESS = "SUCCESS"                            # Batch finished perfectly
@@ -460,12 +468,12 @@ class TransactionPayload(BaseModel):
 class CompareSecretRequest(BaseModel):
     """Represents a single blind comparison request between two item secrets."""
     item_id_a: str = Field(..., description="UUID of the first item")
-    field_a: SecretFieldTarget
-    custom_name_a: Optional[str] = Field(default=None, description="If field_a is CUSTOM_FIELD, specify the exact name of the hidden custom field here.")
+    field_a: str = Field(..., description="Field path (e.g. login.password, notes, or fields.MISTRAL_API_KEY)")
+    custom_name_a: Optional[str] = Field(default=None, description="DEPRECATED: Use fields.NAME in field_a instead.")
     
     item_id_b: str = Field(..., description="UUID of the second item")
-    field_b: SecretFieldTarget
-    custom_name_b: Optional[str] = Field(default=None, description="If field_b is CUSTOM_FIELD, specify the exact name of the hidden custom field here.")
+    field_b: str = Field(..., description="Field path (e.g. login.password, notes, or fields.MISTRAL_API_KEY)")
+    custom_name_b: Optional[str] = Field(default=None, description="DEPRECATED: Use fields.NAME in field_b instead.")
 
 class BatchComparePayload(BaseModel):
     """Payload for submitting multiple blind comparisons in a single batch."""
@@ -485,3 +493,63 @@ class BatchComparePayload(BaseModel):
                 f"(maximum allowed: {MAX_BATCH_SIZE}). Please split your request."
             )
         return self
+
+class FindDuplicatesPayload(BaseModel):
+    """Payload for finding duplicates of a specific item's secret across the vault."""
+    rationale: str = Field(..., description="Why are we scanning the vault for duplicates?")
+    target_id: str = Field(..., description="UUID of the item whose secret we want to find duplicates of.")
+    field: str = Field(..., description="Field path of the target secret (e.g. login.password).")
+    candidate_field: Optional[str] = Field(
+        default=None, 
+        description="Optional: search in a different field on candidates (e.g. search password in 'notes'). Defaults to 'field'."
+    )
+    candidate_ids: Optional[List[str]] = Field(
+        default=None, 
+        description="Optional: list of items to scan."
+    )
+    scan_limit: Optional[int] = Field(
+        default=None,
+        description="Override the default scan limit (1-1000)."
+    )
+
+    @field_validator('scan_limit')
+    @classmethod
+    def check_limit(cls, v: int) -> int:
+        if v is not None and (v < 1 or v > MAX_AUDIT_SCAN_CEILING):
+            raise ValueError(f"scan_limit must be between 1 and {MAX_AUDIT_SCAN_CEILING}")
+        return v
+
+class BatchFindDuplicatesRequest(BaseModel):
+    """Represents one target in a batch duplication scan."""
+    target_id: str = Field(..., description="UUID of the item to find duplicates for.")
+    field: str = Field(..., description="Field path of the secret to match.")
+    candidate_field: Optional[str] = Field(default=None, description="Where to look in other items.")
+
+class FindDuplicatesBatchPayload(BaseModel):
+    """Payload for scanning duplicates for multiple items in a single pass."""
+    rationale: str = Field(..., description="Why are we scanning the vault for this lot of items?")
+    targets: List[BatchFindDuplicatesRequest] = Field(..., min_length=1, max_length=10)
+    candidate_ids: Optional[List[str]] = Field(default=None, description="Items to scan as candidates.")
+    scan_limit: Optional[int] = Field(default=None)
+
+    @field_validator('scan_limit')
+    @classmethod
+    def check_limit(cls, v: int) -> int:
+        if v is not None and (v < 1 or v > MAX_AUDIT_SCAN_CEILING):
+            raise ValueError(f"scan_limit must be between 1 and {MAX_AUDIT_SCAN_CEILING}")
+        return v
+
+class FindAllDuplicatesPayload(BaseModel):
+    """Payload for finding ANY secret collision across the entire vault."""
+    rationale: str = Field(..., description="Why are we performing a total vault collision scan?")
+    scan_limit: Optional[int] = Field(
+        default=None,
+        description="Override the default scan limit (total items scanned)."
+    )
+
+    @field_validator('scan_limit')
+    @classmethod
+    def check_limit(cls, v: int) -> int:
+        if v is not None and (v < 1 or v > MAX_AUDIT_SCAN_CEILING):
+            raise ValueError(f"scan_limit must be between 1 and {MAX_AUDIT_SCAN_CEILING}")
+        return v

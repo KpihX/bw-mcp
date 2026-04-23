@@ -232,35 +232,28 @@ class SecureSubprocessWrapper:
 
     @staticmethod
     def audit_compare_secrets(
-        item_id_a: str, field_a: Union[str, 'SecretFieldTarget'], name_a: str | None,
-        item_id_b: str, field_b: Union[str, 'SecretFieldTarget'], name_b: str | None,
+        item_id_a: str, field_a: str, name_a: str | None,
+        item_id_b: str, field_b: str, name_b: str | None,
         session_key: bytearray
     ) -> bool:
         """
         Executes an isolated, ephemeral Python subprocess to fetch, 
-        parse, and compare two secret fields without EVER loading 
-        the secrets into the main proxy's memory space.
-        Returns True if they match exactly.
+        parse, and compare two secret fields. Now supports dynamic field pathing
+        and top-level field audit (notes).
         """
-        # SECURITY: Defense-in-depth: Ensure field_a/b are within the allowed enum set
-        # (Import inside to avoid circular dependencies)
-        from .models import SecretFieldTarget
+        # SECURITY: Deep validation from centralized models
+        from .models import ALLOWED_NAMESPACES
+        
         for f, label in [(field_a, "field_a"), (field_b, "field_b")]:
-            if isinstance(f, SecretFieldTarget):
-                continue
-            if f not in [e.value for e in SecretFieldTarget]:
-                raise SecureBWError(f"Invalid field target for {label}: '{f}'. Operation rejected for security.")
+            ns = f.split('.')[0]
+            if ns not in ALLOWED_NAMESPACES:
+                raise SecureBWError(f"Invalid field target namespace for {label}: '{ns}'. Operation rejected.")
 
-        # SECURITY: Validate UUIDs before passing to subprocess to prevent
-        # malformed inputs from reaching the Bitwarden CLI.
         for uid, label in [(item_id_a, "item_id_a"), (item_id_b, "item_id_b")]:
             if not _UUID_RE.match(uid):
-                raise SecureBWError(f"Invalid UUID for {label}: '{uid}'. Expected UUID v4 format.")
+                raise SecureBWError(f"Invalid UUID for {label}: '{uid}'.")
         
         env = os.environ.copy()
-        # NOTE: BW_SESSION is injected here. The child Python process inherits
-        # this env, and its own `bw get item` subprocess calls will also inherit
-        # it transitively. This is the intended secure propagation chain.
         env[BW_SESSION_ENV] = session_key.decode('utf-8')
         
         script = """
@@ -272,12 +265,21 @@ def get_bw_item(uuid):
         sys.exit(2)
     return json.loads(res.stdout)
 
-def extract(item, field_path, c_name):
-    if field_path == "fields.VALUE":
+def extract(item, field_path, legacy_name=None):
+    # Dynamic field resolution
+    if field_path.startswith("fields."):
+        # field_path can be 'fields.VALUE' (legacy) + legacy_name 
+        # OR 'fields.MY_KEY' (dynamic).
+        target_name = field_path[7:]
+        if target_name == "VALUE" and legacy_name:
+            target_name = legacy_name
+            
         for f in item.get('fields', []):
-            if f.get('name') == c_name:
+            if f.get('name') == target_name:
                 return f.get('value')
         return None
+        
+    # Standard dot-path resolution
     keys = field_path.split('.')
     val = item
     for k in keys:
@@ -294,6 +296,7 @@ try:
     item_b = get_bw_item(sys.argv[4])
     val_b = extract(item_b, sys.argv[5], sys.argv[6] if sys.argv[6] != '' else None)
     
+    # Support deep comparison for lists (uris) or dicts
     if val_a is not None and val_a != "" and val_a == val_b:
         sys.exit(0)
     else:
@@ -308,19 +311,176 @@ except Exception:
         ]
         
         try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                env=env,
-                check=False
-            )
+            result = subprocess.run(cmd, capture_output=True, env=env, check=False)
             if result.returncode == 0:
                 return True
             elif result.returncode == 1:
                 return False
             else:
-                raise SecureBWError(f"Isolated blind comparison subprocess failed (code {result.returncode}).")
+                raise SecureBWError(f"Audit subprocess failed (code {result.returncode}).")
         finally:
             if BW_SESSION_ENV in env:
                 env[BW_SESSION_ENV] = "DEADBEEF" * 20
+                del env[BW_SESSION_ENV]
+
+    @staticmethod
+    def audit_bulk_compare(
+        target_id: str,
+        field_path: str,
+        candidate_ids: List[str],
+        session_key: bytearray,
+        candidate_field_path: Optional[str] = None
+    ) -> List[str]:
+        """
+        Finds all items in candidate_ids that have the exact same secret 
+        as target_id[field_path]. Supports cross-field search via candidate_field_path.
+        """
+        # Map single target to multi-target engine for consistency
+        prep = [{
+            "target_id": target_id, 
+            "target_path": field_path, 
+            "candidate_path": candidate_field_path or field_path
+        }]
+        
+        results = SecureSubprocessWrapper.audit_multi_target_compare(prep, candidate_ids, session_key)
+        return results.get(target_id, [])
+
+    @staticmethod
+    def audit_multi_target_compare(
+        targets: List[dict], 
+        candidate_ids: List[str],
+        session_key: bytearray
+    ) -> dict:
+        """
+        Finds duplicates for multiple targets in a single sweep of candidate_ids.
+        Extremely efficient: fetches each candidate only once.
+        """
+        # SECURITY Validation
+        from .models import ALLOWED_NAMESPACES
+        all_item_ids = [t["target_id"] for t in targets] + candidate_ids
+        for uid in all_item_ids:
+            if not _UUID_RE.match(uid):
+                raise SecureBWError(f"Invalid UUID in audit request: '{uid}'.")
+        
+        for t in targets:
+            tp, cp = t["target_path"], t.get("candidate_path") or t["target_path"]
+            for p in [tp, cp]:
+                ns = p.split('.')[0]
+                if ns not in ALLOWED_NAMESPACES:
+                    raise SecureBWError(f"Invalid security namespace in path '{p}'. Only {list(ALLOWED_NAMESPACES)} allowed.")
+
+        env = os.environ.copy()
+        env[BW_SESSION_ENV] = session_key.decode('utf-8')
+
+        script = """
+import os, json, subprocess, sys
+
+targets_data = json.loads(sys.argv[1])
+candidates = sys.argv[2:]
+
+def get_bw_item(uuid):
+    try:
+        res = subprocess.run(['bw', 'get', 'item', uuid], capture_output=True, text=True)
+        if res.returncode != 0: return None
+        return json.loads(res.stdout)
+    except Exception: return None
+
+def extract_full_inventory(item):
+    "Returns a list of (value, location_label) pairs for an item."
+    inventory = []
+    if not item: return inventory
+    
+    # Login
+    pwd = item.get('login', {}).get('password')
+    if pwd: inventory.append((pwd, "login.password"))
+    
+    # Notes
+    notes = item.get('notes')
+    if notes: inventory.append((notes, "notes"))
+    
+    # Fields
+    for f in item.get('fields', []):
+        val = f.get('value')
+        if val: inventory.append((val, f"fields.{f.get('name', 'anon')}"))
+        
+    return [(v.strip(), loc) for v, loc in inventory if v and v.strip()]
+
+# MODE DETERMINATION
+special_trigger = 'ffffffff-ffff-ffff-ffff-ffffffffffff'
+is_total_scan = any(t.get('target_id') == special_trigger for t in targets_data)
+
+if is_total_scan or not targets_data:
+    # TOTAL COLLISION SCAN
+    all_ids = candidates if candidates else [i['id'] for i in json.loads(subprocess.run(['bw', 'list', 'items'], capture_output=True, text=True).stdout)]
+    value_map = {} # { secret: [ {id, name, loc}, ... ] }
+    
+    for uid in all_ids:
+        item = get_bw_item(uid)
+        if not item: continue
+        name = item.get('name', 'Unknown')
+        for val, loc in extract_full_inventory(item):
+            if val not in value_map: value_map[val] = []
+            value_map[val].append({"id": uid, "name": name, "loc": loc})
+    
+    # Filter duplicates only
+    collisions = {v: locs for v, locs in value_map.items() if len(locs) > 1}
+    print(json.dumps({"status": "TOTAL_COLLISION", "collisions": collisions}))
+    sys.exit(0)
+
+# 1. Fetch and Cache targets for specific audit
+target_cache = {}
+active_targets = []
+for t in targets_data:
+    tid = t['target_id']
+    if tid not in target_cache:
+        target_cache[tid] = get_bw_item(tid)
+    
+    item = target_cache[tid]
+    if not item: continue
+    path = t['target_path']
+    secret = None
+    if path.startswith("fields."):
+        target_name = path[7:]
+        for f in item.get('fields', []):
+            if f.get('name') == target_name: secret = f.get('value'); break
+    else:
+        keys = path.split('.'); val = item
+        for k in keys:
+            if isinstance(val, dict): val = val.get(k)
+            else: val = None; break
+        secret = val
+        
+    if secret and secret.strip() != "":
+        active_targets.append({"target_id": tid, "secret": secret.strip()})
+
+results = {tid: set() for tid in set(t['target_id'] for t in targets_data)}
+all_ids = candidates if candidates else [i['id'] for i in json.loads(subprocess.run(['bw', 'list', 'items'], capture_output=True, text=True).stdout)]
+
+for cid in all_ids:
+    cand_item = get_bw_item(cid)
+    if not cand_item: continue
+    cand_values = {v for v, l in extract_full_inventory(cand_item)}
+    for target in active_targets:
+        if target["secret"] in cand_values:
+            if cid.lower().strip() != target["target_id"].lower().strip():
+                results[target["target_id"]].add(cid)
+
+print(json.dumps({tid: sorted(list(cids)) for tid, cids in results.items()}))
+"""
+        cmd = [sys.executable, "-c", script, json.dumps(targets)] + candidate_ids
+        
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+            if result.returncode == 0:
+                stdout = result.stdout.strip()
+                if not stdout: return {}
+                try:
+                    return json.loads(stdout)
+                except json.JSONDecodeError:
+                    return {}
+            else:
+                raise SecureBWError(f"Audit analysis failed (CLI code {result.returncode}).")
+        finally:
+            if BW_SESSION_ENV in env:
+                env[BW_SESSION_ENV] = "0" * 40
                 del env[BW_SESSION_ENV]

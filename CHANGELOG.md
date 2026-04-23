@@ -2,6 +2,58 @@
 
 All notable changes to this project, from its inception to the current secure state.
 
+## [v1.9.0] - 2026-04-23: Blind Audit 2.0 — Total Vault Collision Scan
+
+### 🆕 Features
+- **Total Vault Audit**: Introduced `find_all_vault_duplicates` for deep vault-wide collision detection across all secret fields (passwords, notes, custom fields).
+- **Unified Password-First Flow**: Standardized vault unlocking across all audit tools to ensure a fresh, secure session before high-privilege scans.
+- **Proactive Recovery**: Integrated `check_recovery` (WAL integrity check) into audit entrypoints to prevent scans on potentially inconsistent vault states.
+
+### 🔒 Security
+- **Blind Compare Logic**: Enhanced the embedded Python audit script with a "Total Scan" mode that fetches items and builds collision maps without any secret data touching the main process or logs.
+- **Subprocess Hardening**: Fixed a critical indentation/syntax issue in the `subprocess_wrapper` script involving triple-quote nesting.
+
+### 🎨 UI & UX
+- **Global Scan View**: Updated `HITLManager` to clearly explain "Total Vault Collision" modes in Zenity popups, distinguishing them from targeted item scans.
+
+### 🧪 Test Coverage
+- **Full Suite Validation**: Maintained 84/84 tests green, verifying that unified audit logic doesn't break established single-item duplicate patterns.
+
+## [v1.8.6] - 2026-04-22: Audit Engine Unification & Standardized Casing
+
+### 🆕 Features
+- **Unified Audit Engine**: Consolidated `find_item_duplicates` and `find_duplicates_batch` logic into a single high-performance path in `server.py`.
+- **Enhanced Subprocess Layer**: Hardened `SecureSubprocessWrapper` with native support for `candidate_field_path`, allowing efficient cross-field secret comparisons in a single `bw` invocation.
+- **REST-Style Casing Standard**: Standardized all tool response JSON objects to use lowercase `"status": "success"` for consistent machine parsing across all action surfaces.
+
+### 🐛 Bug Fixes
+- **Import Integrity**: Fixed a missing `field_validator` import in `models.py` that caused test collection failures.
+- **Test Alignment**: Updated all 84 tests to match the new casing and payload naming conventions (`duplicate_ids`, `scan_size`, `total_available`).
+
+### 🔧 Housekeeping
+- **Dry/Redundancy Cleanup**: Removed 150+ lines of duplicate logic and redundant internal helper functions in `server.py`.
+- **Refactoring Verification**: Successfully validated against a full 84/84 test suite passing in 3.63s.
+
+
+### 🆕 Features
+- **Blind Duplicate Scanner**: Introduced `find_item_duplicates` tool. Allows the AI to scan the entire vault (or a candidate list) for items sharing the same secret as a target item. Performed in a single, high-speed ephemeral subprocess.
+- **Dynamic Field Pathing**: Refactored the audit engine to support arbitrary dot-path resolution (e.g., `login.uris`, `notes`) and dynamic custom field resolution (e.g., `fields.MISTRAL_API_KEY`) without rigid enumeration.
+- **Configurable Scan Limits**: Increased default duplicate scan limit to 100 via `config.yaml`. The `find_item_duplicates` tool now accepts an optional `scan_limit` parameter, allowing the AI to explicitly bypass the default constraints when handling large vaults.
+- **Cross-Namespace Audit**: The audit engine now supports comparing secrets across different namespaces (e.g., matching a `Secure Note` content against a `Login` custom field).
+- **Deep JSON Metadata Audit**: Support for comparing complex objects like `login.uris` using deep equality checks in the blind subprocess.
+
+### 🔒 Security
+- **Namespace Centralization**: Moved `ALLOWED_NAMESPACES` to `models.py` as a single source of truth for the entire proxy validation layer.
+- **Namespace Whitelisting**: Implemented a defense-in-depth namespace whitelist (`login`, `card`, `identity`, `fields`, `notes`, `secureNote`) to prevent arbitrary property access in the vault JSON.
+- **Bulk Audit Approval**: Added specialized HITL dialog for bulk scans, ensuring the human operator knows exactly which target and field are being used as a search key.
+
+### 🎨 UI & UX
+- **Informative Zenity Audits**: Comparison and Scan dialogues now display item **Names** instead of raw UUIDs (using an ephemeral name map) to provide better context to the human operator. 
+- **Rich Formatting**: Added bold styling and color hints in Zenity to emphasize target items and field paths.
+
+### 🧪 Test Coverage
+- **New Test Suite**: Added `tests/test_audit_v2.py` specifically for dynamic pathing and bulk duplicate scans.
+
 ## [v1.7.2] - 2026-04-22: Documentation & Maintainer Experience
 
 ### 📖 Documentation

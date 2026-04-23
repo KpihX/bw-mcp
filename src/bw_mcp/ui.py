@@ -210,23 +210,84 @@ class HITLManager:
     def review_comparisons(payload: Any, id_to_name: dict = None) -> bool:
         """
         Displays a Zenity dialog with the list of blind comparisons proposed by the agent.
-        Since comparisons are read-only audits, this always uses a standard info dialog.
+        Now shows dynamic field paths clearly.
         """
         def format_req(req, idx):
             def resolve(uuid: str) -> str:
                 name = (id_to_name or {}).get(uuid)
-                return f"'{html.escape(name)}' ({uuid})" if name else f"({uuid})"
+                return f"'{html.escape(name)}'" if name else f"({uuid})"
+            
             a_field = f"'{html.escape(req.custom_name_a)}'" if req.custom_name_a else req.field_a
             b_field = f"'{html.escape(req.custom_name_b)}'" if req.custom_name_b else req.field_b
-            return f"{idx}. ⚖️ COMPARE SECRET {resolve(req.item_id_a)} [{a_field}] == {resolve(req.item_id_b)} [{b_field}]"
+            
+            return f"{idx}. ⚖️ <b>{resolve(req.item_id_a)}</b> [{a_field}] ↔️ <b>{resolve(req.item_id_b)}</b> [{b_field}]"
 
         formatted_ops = "\n".join(
             format_req(req, i) for i, req in enumerate(payload.comparisons, 1)
         )
         
-        title = "Review Security Audit (Secret Comparison)"
-        text_header = "The AI Agent requests to perform blind secret comparisons on your vault."
-        text = f"{text_header}\n\n<b>Comparisons (Read-Only):</b>\n{formatted_ops}\n\n<b>Rationale:</b> {html.escape(payload.rationale)}\n\nDo you explicitly grant permission to audit these fields?"
+        title = "🔒 Security Audit: Private Secret Comparison"
+        text_header = "The AI Agent requests <b>Blind Comparisons</b> between secrets.\n"
+        text_header += "<span foreground='blue'>The AI will only see 'MATCH' or 'MISMATCH'. It will NOT see the content.</span>"
+        
+        text = f"{text_header}\n\n<b>Comparisons (Read-Only):</b>\n{formatted_ops}\n\n<b>Rationale:</b> {html.escape(payload.rationale)}\n\nDo you grant permission to perform this blind audit?"
+        
+        try:
+            cmd = [
+                "zenity", "--question",
+                f"--title={title}",
+                "--text", text,
+                "--width=750",
+                "--height=550"
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            return result.returncode == 0
+        except FileNotFoundError:
+            raise RuntimeError("Zenity is not installed.")
+
+    @staticmethod
+    def review_duplicate_scan(payload: Any, id_to_name: dict = None) -> bool:
+        """
+        Human-in-the-loop for bulk duplicate scans (Single or Batch).
+        """
+        def resolve(uuid: str) -> str:
+            name = (id_to_name or {}).get(uuid)
+            return f"'{html.escape(name)}'" if name else f"({uuid})"
+            
+        title = "🔍 Bulk Audit: Secret Duplicate Finder"
+        text_header = f"The AI Agent requests a <b>Blind Secret Scan</b> of your vault.\n"
+        text_header += "<span foreground='blue'>Results will only list IDs that match your target secrets. The actual text remains hidden.</span>"
+
+        # Handle Single vs Batch payloads
+        from .models import FindDuplicatesPayload, FindDuplicatesBatchPayload, FindAllDuplicatesPayload
+        
+        details = []
+        if isinstance(payload, FindDuplicatesPayload):
+            target = resolve(payload.target_id)
+            field = html.escape(payload.field)
+            cand_field = html.escape(payload.candidate_field or field)
+            details.append(f"• <b>Target:</b> {target} [field: {field}]")
+            details.append(f"• <b>Searching in:</b> candidates [field: {cand_field}]")
+        elif isinstance(payload, FindDuplicatesBatchPayload):
+            details.append("<b>Batch Targets:</b>")
+            for t in payload.targets:
+                target = resolve(t.target_id)
+                field = html.escape(t.field)
+                details.append(f"  - {target} [field: {field}]")
+        elif isinstance(payload, FindAllDuplicatesPayload):
+            details.append("🌐 <b>Mode: Total Vault Collision Scan</b>")
+            details.append("This will scan <b>ALL secrets</b> across <b>ALL items</b> to find reuse.")
+        
+        count = len(getattr(payload, 'candidate_ids', []) or [])
+        cand_str = f"{count} items" if count > 0 else "ALL (restricted by type)"
+        
+        text = (
+            f"{text_header}\n\n"
+            f"{chr(10).join(details)}\n"
+            f"• <b>Candidate Pool:</b> {cand_str}\n\n"
+            f"<b>Rationale:</b> {html.escape(payload.rationale)}\n\n"
+            f"Do you grant permission to perform this scan?"
+        )
         
         try:
             cmd = [
@@ -240,3 +301,4 @@ class HITLManager:
             return result.returncode == 0
         except FileNotFoundError:
             raise RuntimeError("Zenity is not installed.")
+ 

@@ -16,3 +16,5 @@ wal_crypto:
 audit:
   match_tag: "MATCH"
   mismatch_tag: "MISMATCH"
+  max_scan_size: 100
+  max_scan_ceiling: 1000

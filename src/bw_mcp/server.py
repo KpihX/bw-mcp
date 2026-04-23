@@ -1,11 +1,16 @@
 import json
 
 from mcp.server.fastmcp import FastMCP
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Annotated
 
-from .config import load_config, MAX_BATCH_SIZE, REDACTED_POPULATED, AUDIT_MATCH_TAG, AUDIT_MISMATCH_TAG
+from .config import load_config, MAX_BATCH_SIZE, REDACTED_POPULATED, AUDIT_MATCH_TAG, AUDIT_MISMATCH_TAG, MAX_AUDIT_SCAN_SIZE
 from .subprocess_wrapper import SecureSubprocessWrapper, SecureBWError, SecureProxyError, _safe_error_message
-from .models import BlindItem, BlindFolder, BlindOrganization, BlindOrganizationCollection, TransactionPayload, TemplateType, BatchComparePayload, TransactionStatus
+from .models import (
+    BlindItem, BlindFolder, BlindOrganization, BlindOrganizationCollection, 
+    TransactionPayload, TemplateType, BatchComparePayload, TransactionStatus,
+    FindDuplicatesPayload, CompareSecretRequest, FindDuplicatesBatchPayload,
+    FindAllDuplicatesPayload
+)
 from .transaction import TransactionManager
 from .logger import TransactionLogger
 from .wal import WALManager
@@ -260,7 +265,7 @@ def inspect_transaction_log(tx_id: str = None, n: int = None) -> str:
 @mcp.tool()
 def compare_secrets_batch(payload: BatchComparePayload) -> str:
     """
-    BLIND AUDIT PRIMITIVE: Safely compares secret fields (passwords, TOTPs, SSNs) 
+    BLIND AUDIT PRIMITIVE: Safely compares secret fields (passwords, TOTPs, URIs, notes)
     between two vault items without EVER exposing the text to you (the LLM).
     Useful for deduplication audits or confirming successful migrations.
     Returns highly structured JSON with matching statuses.
@@ -268,29 +273,29 @@ def compare_secrets_batch(payload: BatchComparePayload) -> str:
     master_password = None
     session_key = None
     try:
-        # 1. Single unlock — avoids the double-popup anti-pattern
-        master_password = HITLManager.ask_master_password(title="BW-MCP: Unlock Vault for Secret Audit")
+        # 1. Unlock sequence (Password-First)
+        master_password = HITLManager.ask_master_password(title="Unlock Vault for Secret Audit")
         session_key = SecureSubprocessWrapper.unlock_vault(master_password)
         
-        # 2. Build id_to_name map inline from vault data (items + folders)
+        # 2. Safety recovery check
+        recovery_msg = TransactionManager.check_recovery(master_password, session_key)
+        if recovery_msg:
+            return recovery_msg
+
+        # 3. Resolve Names for HITL review
         id_to_name = {}
         try:
             raw_items = SecureSubprocessWrapper.execute_json(["list", "items"], session_key)
             for item in raw_items:
                 if item.get("id") and item.get("name"):
                     id_to_name[item["id"]] = item["name"]
-            raw_folders = SecureSubprocessWrapper.execute_json(["list", "folders"], session_key)
-            for folder in raw_folders:
-                if folder.get("id") and folder.get("name"):
-                    id_to_name[folder["id"]] = folder["name"]
         except Exception:
-            pass  # Graceful degradation: UUIDs will be shown raw in Zenity
-        
-        # 3. Ask human explicitly for permission to perform the audit
+            pass
+            
+        # 4. HITL Review
         if not HITLManager.review_comparisons(payload, id_to_name):
             return json.dumps({"status": "ABORTED", "message": "Audit cancelled by user."})
         
-        # 4. Execute comparisons
         results = []
         for i, req in enumerate(payload.comparisons, 1):
             try:
@@ -309,40 +314,21 @@ def compare_secrets_batch(payload: BatchComparePayload) -> str:
                     "verdict": verdict
                 })
             except Exception as e:
-                results.append({
-                    "index": i,
-                    "error": _safe_error_message(e)
-                })
+                results.append({"index": i, "error": _safe_error_message(e)})
 
-        # 5. Log the audit (read-only, no WAL needed)
-        # Build a synthetic TransactionPayload for the logger's interface
-        mock_payload = TransactionPayload(
-            rationale=payload.rationale,
-            operations=[]
-        )
-        unique_items = len({r.item_id_a for r in payload.comparisons} | {r.item_id_b for r in payload.comparisons})
-        TransactionLogger.log_transaction(
-            transaction_id=f"audit-{len(payload.comparisons)}x{unique_items}",
-            payload=mock_payload,
-            status=TransactionStatus.SUCCESS,
-            executed_ops=[f"Blind comparison #{r['index']}: {r.get('verdict', 'ERROR')}" for r in results]
-        )
-        
-        return json.dumps({"status": "SUCCESS", "results": results}, indent=2)
+        return json.dumps({"status": "success", "results": results}, indent=2)
 
-    except SecureBWError as e:
-        return f"Bitwarden CLI Error during audit: {str(e)}"
     except Exception as e:
         return f"Proxy Error during audit: {_safe_error_message(e)}"
     finally:
         if session_key is not None:
-            for i in range(len(session_key)):
-                session_key[i] = 0
+            for i in range(len(session_key)): session_key[i] = 0
             del session_key
         if master_password is not None:
             for i in range(len(master_password)):
                 master_password[i] = 0
             del master_password
+
 
 def _fetch_template(template_type: str) -> str:
     """
@@ -357,9 +343,15 @@ def _fetch_template(template_type: str) -> str:
     master_password = None
     session_key = None
     try:
-        master_password = HITLManager.ask_master_password(title=f"Enter Master Password to fetch {valid_type.value} schema")
-        
+        # 1. Unlock sequence (Password-First)
+        master_password = HITLManager.ask_master_password(title=f"Unlock Vault for {valid_type.value} schema")
         session_key = SecureSubprocessWrapper.unlock_vault(master_password)
+        
+        # 2. Safety recovery check
+        recovery_msg = TransactionManager.check_recovery(master_password, session_key)
+        if recovery_msg:
+            return recovery_msg
+
         template_data = SecureSubprocessWrapper.execute_json(["get", "template", valid_type.value], session_key)
         safe_data = deep_scrub_payload(template_data)
         
@@ -376,8 +368,165 @@ def _fetch_template(template_type: str) -> str:
         return f"Proxy Error: {_safe_error_message(e)}"
     finally:
         if session_key is not None:
-            for i in range(len(session_key)):
-                session_key[i] = 0
+            for i in range(len(session_key)): session_key[i] = 0
+            del session_key
+        if master_password is not None:
+            for i in range(len(master_password)):
+                master_password[i] = 0
+            del master_password
+
+@mcp.tool()
+def find_item_duplicates(payload: Annotated[FindDuplicatesPayload, "The duplication scan request."]) -> str:
+    """
+    Finds items sharing the same secret value as a target item.
+    Supports dynamic field pathing (e.g. login.password, notes, fields.API_KEY).
+    Self-bypass enabled for scan_limit.
+    """
+    master_password = None
+    session_key = None
+    try:
+        # 1. Unlock sequence (Password-First)
+        master_password = HITLManager.ask_master_password(title="Unlock Vault for Duplicate Scan")
+        session_key = SecureSubprocessWrapper.unlock_vault(master_password)
+
+        # 2. Safety recovery check
+        recovery_msg = TransactionManager.check_recovery(master_password, session_key)
+        if recovery_msg:
+            return recovery_msg
+
+        # 3. Resolve target name for HITL review
+        id_to_name = {}
+        target_item = None
+        raw_items = []
+        try:
+            # 💡 Execution Order: Fetch items list THEN specific item for name resolution
+            raw_items = SecureSubprocessWrapper.execute_json(["list", "items"], session_key)
+            target_item = SecureSubprocessWrapper.execute_json(["get", "item", payload.target_id], session_key)
+            if target_item:
+                id_to_name[payload.target_id] = target_item.get("name", payload.target_id)
+        except Exception:
+            pass
+
+        # 4. Human-in-the-loop review
+        if not HITLManager.review_duplicate_scan(payload, id_to_name):
+            return json.dumps({"status": "error", "message": "Operation aborted by user."})
+
+        # 5. Candidate Discovery
+        candidates = payload.candidate_ids
+        total_found = 0
+        if not candidates:
+            if not target_item:
+                 target_item = SecureSubprocessWrapper.execute_json(["get", "item", payload.target_id], session_key)
+            
+            target_type = target_item.get("type")
+            all_potential = [i["id"] for i in raw_items if i.get("type") == target_type and i.get("id") != payload.target_id]
+            total_found = len(all_potential)
+            
+            limit = payload.scan_limit if payload.scan_limit is not None else MAX_AUDIT_SCAN_SIZE
+            candidates = all_potential[:limit]
+        else:
+            total_found = len(candidates)
+
+        # 6. Blind Execution
+        matches = SecureSubprocessWrapper.audit_bulk_compare(
+            target_id=payload.target_id,
+            field_path=payload.field,
+            candidate_ids=candidates,
+            session_key=session_key,
+            candidate_field_path=payload.candidate_field
+        )
+
+        return json.dumps({
+            "status": "success",
+            "duplicate_ids": matches,
+            "scan_size": len(candidates),
+            "total_available": total_found
+        }, indent=2)
+
+    except Exception as e:
+        return json.dumps({"status": "error", "message": f"Proxy Error: {_safe_error_message(e)}"})
+    finally:
+        if session_key is not None:
+            for i in range(len(session_key)): session_key[i] = 0
+            del session_key
+        if master_password is not None:
+            for i in range(len(master_password)):
+                master_password[i] = 0
+            del master_password
+
+@mcp.tool()
+def find_duplicates_batch(payload: FindDuplicatesBatchPayload) -> str:
+    """
+    Finds duplicates for multiple targets in a single sweep.
+    Best for cleaning up the vault without multiple master password prompts.
+    """
+    master_password = None
+    session_key = None
+    try:
+        # 1. Unlock sequence (Password-First)
+        master_password = HITLManager.ask_master_password(title="Unlock Vault for Duplicate Batch Audit")
+        session_key = SecureSubprocessWrapper.unlock_vault(master_password)
+
+        # 2. Safety recovery check
+        recovery_msg = TransactionManager.check_recovery(master_password, session_key)
+        if recovery_msg:
+            return recovery_msg
+
+        # 3. Resolve names for HITL review
+        id_to_name = {}
+        try:
+            raw_items = SecureSubprocessWrapper.execute_json(["list", "items"], session_key)
+            for t in payload.targets:
+                for item in raw_items:
+                    if item["id"] == t.target_id:
+                        id_to_name[t.target_id] = item["name"]
+                        break
+        except Exception:
+            pass
+
+        # 4. Review Request
+        if not HITLManager.review_duplicate_scan(payload, id_to_name):
+            return "Operation aborted by user."
+
+        # 5. Candidate Discovery
+        candidates = payload.candidate_ids
+        total_found = 0
+        if not candidates:
+            # We fetch once for the whole batch
+            raw_items = SecureSubprocessWrapper.execute_json(["list", "items"], session_key)
+            all_potential = [i["id"] for i in raw_items]
+            total_found = len(all_potential)
+            limit = payload.scan_limit if payload.scan_limit is not None else MAX_AUDIT_SCAN_SIZE
+            candidates = all_potential[:limit]
+        else:
+            total_found = len(candidates)
+
+        # 6. Preparation for multi-target scan
+        prep = []
+        for t in payload.targets:
+            prep.append({
+                "target_id": t.target_id,
+                "target_path": t.field,
+                "candidate_path": t.candidate_field or t.field
+            })
+
+        # 7. Execute Multi-Audit
+        results = SecureSubprocessWrapper.audit_multi_target_compare(
+            prep, candidates, session_key
+        )
+
+        return json.dumps({
+            "status": "success",
+            "results": results,
+            "scan_size": len(candidates),
+            "total_available": total_found
+        }, indent=2)
+
+    except Exception as e:
+        return f"Proxy Error: {_safe_error_message(e)}"
+    finally:
+        if session_key is not None:
+            for i in range(len(session_key)): session_key[i] = 0
             del session_key
         if master_password is not None:
             for i in range(len(master_password)):
@@ -396,6 +545,58 @@ def get_template(template_type: TemplateType) -> str:
 def template_resource(template_type: str) -> str:
     """Read a Bitwarden entity template schema (e.g. bw://templates/item.login)"""
     return _fetch_template(template_type)
+
+@mcp.tool()
+def find_all_vault_duplicates(payload: Annotated[FindAllDuplicatesPayload, "The total vault collision scan request."]) -> str:
+    """
+    Scans the entire vault for ANY items sharing secret values (passwords, notes, identical custom fields).
+    This is a deep audit tool for identifying overall secret reuse patterns.
+    """
+    master_password = None
+    session_key = None
+    try:
+        # 1. Unlock sequence (Password-First)
+        master_password = HITLManager.ask_master_password(title="Unlock Vault for Global Collision Scan")
+        session_key = SecureSubprocessWrapper.unlock_vault(master_password)
+
+        # 2. Safety recovery check
+        recovery_msg = TransactionManager.check_recovery(master_password, session_key)
+        if recovery_msg:
+            return recovery_msg
+
+        # 3. Target discovery (all items)
+        limit = payload.scan_limit if payload.scan_limit is not None else MAX_AUDIT_SCAN_SIZE
+        raw_items = SecureSubprocessWrapper.execute_json(["list", "items"], session_key)
+        all_ids = [i["id"] for i in raw_items][:limit]
+
+        # 4. Human-in-the-loop review
+        if not HITLManager.review_duplicate_scan(payload, {}):
+             return json.dumps({"status": "error", "message": "Operation aborted by user."})
+
+        # 5. Blind Execution (Special Trigger)
+        special_target = [{
+            "target_id": "ffffffff-ffff-ffff-ffff-ffffffffffff",
+            "target_path": "notes"
+        }]
+        
+        audit_results = SecureSubprocessWrapper.audit_multi_target_compare(
+            targets=special_target,
+            candidate_ids=all_ids,
+            session_key=session_key
+        )
+
+        return json.dumps(audit_results, indent=2)
+
+    except Exception as e:
+        return json.dumps({"status": "error", "message": f"Proxy Error: {_safe_error_message(e)}"})
+    finally:
+        if session_key is not None:
+            for i in range(len(session_key)): session_key[i] = 0
+            del session_key
+        if master_password is not None:
+            for i in range(len(master_password)):
+                master_password[i] = 0
+            del master_password
 
 def main():
     """Entry point for the script."""

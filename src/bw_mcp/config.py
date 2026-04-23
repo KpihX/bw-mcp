@@ -117,3 +117,9 @@ _audit_config = _config_cache.get("audit", {})
 
 AUDIT_MATCH_TAG: str = _audit_config.get("match_tag", "MATCH")
 AUDIT_MISMATCH_TAG: str = _audit_config.get("mismatch_tag", "MISMATCH")
+
+# Maximum candidates for an automatic blind duplicate scan
+MAX_AUDIT_SCAN_SIZE: int = _audit_config.get("max_scan_size", 100)
+
+# Hard physical ceiling for any scan to prevent memory/CLI exhaustion
+MAX_AUDIT_SCAN_CEILING: int = _audit_config.get("max_scan_ceiling", 1000)

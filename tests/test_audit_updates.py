@@ -112,7 +112,7 @@ def test_compare_secrets_batch_tool(mock_review, mock_ask, mock_compare, mock_ex
     result_json = compare_secrets_batch(payload)
     result = json.loads(result_json)
     
-    assert result["status"] == "SUCCESS"
+    assert result["status"] == "success"
     assert len(result["results"]) == 1
     assert "MATCH" in result["results"][0]["verdict"]
 
