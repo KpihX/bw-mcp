@@ -93,6 +93,6 @@ If `_perform_rollback` encounters an error (e.g. `"Item not found"` because it w
 - **Isolation (I):** `check_recovery()` blocks all new operations until the vault is confirmed clean.
 - **Durability (D):** The encrypted WAL survived the power cut. It was consumed incrementally using `pop_rollback_command` (which re-encrypts the WAL after each pop), making the recovery crash-proof itself.
 - **Confidentiality:** The WAL file is AES-encrypted (Fernet + PBKDF2) and `chmod 600`. Even if exfiltrated, it's useless without the Master Password.
-- **Transparency:** A `CRASH_RECOVERED_ON_BOOT` JSON log is written as forensic proof (scrubbed by `deep_scrub_payload`). Inspect with `bw-proxy log --last 1`.
+- **Transparency:** A `CRASH_RECOVERED_ON_BOOT` JSON log is written as forensic proof (scrubbed by `deep_scrub_payload`). Inspect with `bw-admin log view -l 1`.
 
 **Outcome:** Your data survived a hardware failure — and would survive a sequence of hardware failures — thanks to the encrypted, idempotent WAL Engine.

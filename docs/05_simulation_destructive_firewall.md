@@ -104,10 +104,10 @@ The proxy intercepts this instruction. Because the user is manipulating two dist
 
 ```bash
 # View the last 5 transactions in a rich table
-uv run bw-proxy logs
+bw-admin log view -l 5
 
 # View the full JSON details of the most recent transaction
-uv run bw-proxy log
+bw-admin log view -n 1
 ```
 
 **Audit Log — Batch 1 (delete_item) :**

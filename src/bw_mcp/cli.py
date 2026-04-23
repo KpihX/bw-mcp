@@ -221,7 +221,7 @@ def config_update(
 def version_callback(value: bool):
     if value:
         v = pkg_version("bw-mcp")
-        console.print(f"bw-proxy version: [bold]{v}[/bold]")
+        console.print(f"bw-admin version: [bold]{v}[/bold]")
         raise typer.Exit()
 
 @app.callback()

@@ -448,7 +448,7 @@ The Proxy exposes exactly **five** tools to the AI Agent. This limits the attack
 *   **Absolute Agent-Blindness:** The AI operates exclusively on sanitized payloads (Pydantic `extra="ignore"` for reads, `extra="forbid"` for writes). Passwords, TOTPs, CVVs, and secure notes are mathematically scrubbed before reaching the context window.
 *   **Human-in-The-Loop Execution:** All write operations trigger a massive Zenity UI popup detailing the exact operations intent. The human must visually authorize the batch and enter the Master Password.
 *   **ACID Transaction Engine:** A full 3-phase Commit engine (Virtual Vault RAM Simulation $\rightarrow$ Disk Write-Ahead Log $\rightarrow$ LIFO Rollback) guarantees mathematical consistency. The vault is never left in an uncommitted state even upon network failure or `kill -9` process interruptions.
-*   **Auditing & CLI:** Every modification request is written to a human-readable, secret-stripped log in `logs/transactions/`. A dedicated Typer/Rich CLI (`bw-proxy logs`) allows you to view the latest modifications beautifully in the terminal.
+*   **Auditing & CLI:** Every modification request is written to a human-readable, secret-stripped log in `logs/transactions/`. A dedicated Typer/Rich CLI (`bw-admin log view`) allows you to view the latest modifications beautifully in the terminal.
 *   **Input (AI provides):**
     *   `rationale` (str): A direct message to the user explaining *why* the AI wants to do this.
     *   `operations` (List[VaultTransactionAction]): An array of polymorphic action objects.
@@ -727,7 +727,7 @@ Binary format: [16-byte salt][Fernet ciphertext (AES-128-CBC + HMAC-SHA256)]
 Permissions:   chmod 600 (owner-only read/write)
 Decryption:    Requires the same Master Password used during the transaction.
 ```
-To inspect a stranded WAL, use the CLI: `bw-admin wal` (prompts for Master Password, displays scrubbed content).
+To inspect a stranded WAL, use the CLI: `bw-admin wal view` (prompts for Master Password, displays scrubbed content).
 
 ---
 

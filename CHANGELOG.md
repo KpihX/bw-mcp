@@ -10,6 +10,12 @@ All notable changes to this project, from its inception to the current secure st
 - **AppArmor Enforcement**: Automated the generation and loading of a restrictive AppArmor profile (`/etc/apparmor.d/opt.bw-mcp.bin.bw-mcp`) allowing access only to specific data and system resources.
 - **Unified Audit Target**: Added `make audit` for automated verification of installation ownerships, permissions, and security posture.
 
+### 📖 Documentation & CLI Synchronization
+- **Binary Renaming**: Finalized the transition of the administration CLI from `bw-proxy` to `bw-admin` to avoid naming collisions and improve clarity.
+- **Documentation Parity**: Updated `README.md`, `AUDIT.md`, and all simulation guides (`docs/05_*`, `docs/08_*`, etc.) to use the current `bw-admin` and `bw-mcp` command structures.
+- **Subcommand Calibration**: Standardized `bw-admin log view` and `bw-admin wal view` references across the entire doc suite.
+- **Template Synchronization**: Updated `k-final` security templates (`Makefile.security.uv/bun`) to align with the new standard.
+
 ### 🔧 Housekeeping
 - **Makefile Path Robustness**: Hardened `UV` path discovery and fixed `make check` execution logic (`uv run python3 -m pytest`).
 - **Data Dir Management**: Improved uninstallation logic to cleanly remove AppArmor profiles and user-specific data directories.
