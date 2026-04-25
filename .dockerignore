@@ -1,0 +1,14 @@
+.git
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.coverage
+dist
+build
+.claude
+.gemini
+.agent
+logs/
+wal/
+*.log

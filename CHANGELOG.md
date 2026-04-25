@@ -2,7 +2,56 @@
 
 All notable changes to this project, from its inception to the current secure state.
 
-## [v2.0.0-rc1] - 2026-04-23: Blind Refactoring — v2.0 Foundation
+## [v2.4.0] - 2026-04-24: Sovereign SSL & Two-Step HITL
+### 🔒 Security
+- **Local HTTPS Support**: HITL server now uses ephemeral self-signed SSL certificates (OpenSSL) to protect local loopback traffic and Master Password transmission.
+- **Two-Step Approval Flow**: Introduced a "Lock Screen" in the Web UI. Transaction details are now strictly hidden until the Master Password is provided, preventing accidental exposure of proposed actions.
+- **Enforced Authentication**: Password-first flow is now mandatory for all vault reviews and duplicate scans.
+- **100% Agnostic Host Link**: Replaced Linux-oriented Bash shims with a Python-based intelligent switcher. The `bw-proxy` binary now works cross-platform (Windows/Mac/Linux) by detecting a local `.docker_mode` marker.
+
+## [v2.3.0] - 2026-04-24: Agnostic Web Approval UI & Sovereign Browser HITL
+### 🆕 Features
+- **Total Agnostic UI (Browser HITL)**: Unified all user interactions (Vault Unlock, Transactions, Audit Comparisons, Duplicate Scans, Auth) into a lightweight browser-based interface.
+- **Agnostic Architecture**: Zenity dependency completely removed. Works on Linux, Mac, Windows, and Headless (via SSH forwarding).
+- **Micro-Server HITL Architecture**: `bw-proxy` embeds a lightweight, temporary `HTTPServer` on `localhost:1138` with glassmorphism design and strict security tokens.
+- **Premium Design System**: The new UI features a modern, high-wow design with glassmorphism, Inter typography, and clear visual hierarchy for rationales and destructive warnings.
+- **Secure Link with Token**: Approvals are protected by unique, one-time UUID tokens displayed in the terminal.
+- **Auto-Open Integration**: Support for `webbrowser.open()` to automatically trigger approval tabs in the user's default browser.
+
+### 🛡️ Security
+- **Strict RAM-Only Enforcement**: Reinforced zero-persistence of secrets. The Browser HITL captures the Master Password as a `bytearray` and immediately wipes it from RAM once the transaction is authorized.
+- **AppArmor Networking**: Updated the sovereign AppArmor profile to allow `network inet stream` specifically for the local HITL server.
+- **Docker Port Exposure**: Updated `docker-compose.yml` to expose port `1138` by default for the Agnostic UI.
+
+## [v2.2.2] - 2026-04-24: BW-Proxy Distribution & RAM-Only Hardening
+### 🛡️ Security
+- **RAM-Only Authentication Contract**: Removed parent-environment `BW_PASSWORD` / `BW_SESSION` consumption from application auth flows. BW-Proxy now prompts for the Master Password for each operation, creates a fresh session, and wipes it after use.
+- **Docker Secret Hygiene**: Removed secret passthrough from Docker Compose and the host wrapper. `.env` is now limited to non-secret configuration such as server URL, account email, UID, and GID.
+- **Verified Bitwarden CLI Supply Chain**: Docker builds now download a pinned Bitwarden CLI release and verify SHA-256 for amd64/arm64 before installing it.
+- **Non-Root Container Runtime**: The runtime image now runs as an unprivileged user and keeps `/data` owner-only.
+
+### 🧰 Distribution
+- **Classic Install Split**: `make install` is now the natural user-space CLI install. The previous root-owned `/opt` flow is explicit as `make install-hardened`.
+- **Docker Modes Split**: Docker is headless by default for cross-platform portability. Linux/X11 GUI approval is isolated in `docker-compose.gui.yml` and `make docker-up-gui`.
+- **Current Naming Alignment**: Runtime configuration now uses `BW-Proxy` and `~/.bw/proxy` for current state. Historical changelog entries remain unchanged.
+
+## [v2.2.1] - 2026-04-24: Real-time Hardening & Item Creation Fix
+### 🛠️ Fixed
+- **Automated Setup Resilience**: Hardened `admin setup` to ignore "Logout required" errors during server configuration if already set, allowing smooth progression to session validation.
+- **Transaction Schema Alignment**: Resolved a Pydantic `ValidationError` by adding the missing `notes` field to the `CreateItemAction` model.
+- **CLI Schema Compliance**: Fixed a critical `TypeError: Cannot read properties of null (reading 'type')` crash in Bitwarden CLI v2024 by ensuring nested objects (`login`, `secureNote`, `card`, `identity`) are properly initialized from templates during item creation.
+- **Enhanced Debug Visibility**: Modified the subprocess execution engine to capture and report CLI `stderr` outputs in proxy exceptions, enabling rapid real-time troubleshooting.
+
+## [v2.2.0] - 2026-04-23: Automated Discovery & Setup
+### 🆕 Features
+- **Automated Authentication Setup (`bw-proxy admin setup`)**: Introduced a guided, sequential discovery flow for Bitwarden authentication (URL -> Email -> Password).
+- **Environment Ingestion**: Support for `BW_URL`, `BW_EMAIL`, and `BW_PASSWORD` in the `.env` file for zero-touch configuration in containerized environments.
+- **TUI & GUI Parity**: Robust fallback mechanism for interactive prompts: automatically uses Zenity popups if `DISPLAY` is available, falling back to secure TTY input (`getpass`/`typer.prompt`) otherwise.
+- **Secure Persistence**: Setup persists the encrypted session internally; the `session_key` is NEVER exposed in the console output or logs.
+- **Silent Session Validation**: Proactively checks for existing valid sessions before triggering the discovery prompts.
+
+## [v2.1.0] - 2026-04-23: Sovereign Appliance Hardening
+
 
 ### 🆕 Features
 - **Blind Refactoring Tool (`refactor_item_secrets`)**: Introduced a breakthrough tool for secure `MOVE`, `COPY`, and `DELETE` of secrets between vault items.
@@ -20,19 +69,19 @@ All notable changes to this project, from its inception to the current secure st
 ## [v1.9.2] - 2026-04-23: Sovereign Hardening — Root-Owned Immutability
 
 ### 🛡️ Security & Installation
-- **Sovereign Install Workflow**: Transitioned to a root-owned `/opt/bw-mcp` installation pattern with user-specific data directories (`~/.bw/mcp`) and binaries (`~/.local/bin`).
+- **Sovereign Install Workflow**: Transitioned to a root-owned `/opt/bw-proxy` installation pattern with user-specific data directories (`~/.bw/mcp`) and binaries (`~/.local/bin`).
 - **Dynamic User Discovery**: Implemented `REAL_USER` and `REAL_HOME` logic in `Makefile` using `getent` and `SUDO_USER` to ensure correct path resolution when installed via `sui/sudo`.
-- **AppArmor Enforcement**: Automated the generation and loading of a restrictive AppArmor profile (`/etc/apparmor.d/opt.bw-mcp.bin.bw-mcp`) allowing access only to specific data and system resources.
+- **AppArmor Enforcement**: Automated the generation and loading of a restrictive AppArmor profile (`/etc/apparmor.d/opt.bw-proxy.bin.bw-proxy`) allowing access only to specific data and system resources.
 - **Unified Audit Target**: Added `make audit` for automated verification of installation ownerships, permissions, and security posture.
 
 ### 📖 Documentation & CLI Synchronization
-- **Binary Renaming**: Finalized the transition of the administration CLI from `bw-proxy` to `bw-admin` to avoid naming collisions and improve clarity.
-- **Documentation Parity**: Updated `README.md`, `AUDIT.md`, and all simulation guides (`docs/05_*`, `docs/08_*`, etc.) to use the current `bw-admin` and `bw-mcp` command structures.
-- **Subcommand Calibration**: Standardized `bw-admin log view` and `bw-admin wal view` references across the entire doc suite.
+- **Binary Renaming**: Finalized the transition of the administration CLI from `bw-proxy` to `bw-proxy` to avoid naming collisions and improve clarity.
+- **Documentation Parity**: Updated `README.md`, `AUDIT.md`, and all simulation guides (`docs/05_*`, `docs/08_*`, etc.) to use the current `bw-proxy` and `bw-proxy` command structures.
+- **Subcommand Calibration**: Standardized `bw-proxy log view` and `bw-proxy wal view` references across the entire doc suite.
 - **Template Synchronization**: Updated `k-final` security templates (`Makefile.security.uv/bun`) to align with the new standard.
 
 ### 🔧 Housekeeping
-- **Makefile Path Robustness**: Hardened `UV` path discovery and fixed `make check` execution logic (`uv run python3 -m pytest`).
+- **Makefile Path Robustness**: Hardened `UV` path discovery and fixed `make check` execution logic (`uv run python -m pytest`).
 - **Data Dir Management**: Improved uninstallation logic to cleanly remove AppArmor profiles and user-specific data directories.
 
 ## [v1.9.0] - 2026-04-23: Blind Audit 2.0 — Total Vault Collision Scan
@@ -92,11 +141,11 @@ All notable changes to this project, from its inception to the current secure st
 
 ### 📖 Documentation
 - **Maintainer Entrypoint**: Added a clear high-level map to the `README.md` to help new agents and developers navigate the core engine (ACID/WAL), the data layer (Redaction), and the server interface.
-- **Operations Runbook**: Created `docs/OPERATIONS.md` covering the daemon lifecycle controller (`bw-mcp status/stop/restart`) and the WAL crash recovery flow.
+- **Operations Runbook**: Created `docs/OPERATIONS.md` covering the daemon lifecycle controller (`bw-proxy status/stop/restart`) and the WAL crash recovery flow.
 - **Veracity Audit**: Performed a full documentation audit against the live Python source and 81/81 test suite to ensure all architectural claims remain strictly accurate.
 
 ### 🔧 Housekeeping
-- **Makefile Hardening**: Updated the `test` target to use `uv run python3 -m pytest -q` for better cross-environment compatibility and script resolution.
+- **Makefile Hardening**: Updated the `test` target to use `uv run python -m pytest -q` for better cross-environment compatibility and script resolution.
 - **TODO Cleanup**: Finalized and retired the "documentation enhancement" and "operator runbook" roadmap items.
 
 ## [v1.7.1] - 2026-03-22: WAL Security Hardening & Robustness Fixes
@@ -106,7 +155,7 @@ All notable changes to this project, from its inception to the current secure st
 
 ### 🐛 Bug Fixes
 - **Specific Exception Handling**: Replaced broad `except Exception` with `except (json.JSONDecodeError, AttributeError)` in `transaction.py` rollback flow for cleaner error surface.
-- **Path Fix in CHANGELOG**: Corrected PID file path reference (`~/.bw_mcp/` → `~/.bw/mcp/`).
+- **Path Fix in CHANGELOG**: Corrected PID file path reference (`~/.bw_proxy/` → `~/.bw/mcp/`).
 
 ### 🔧 Housekeeping
 - Import cleanup across `config.py`, `daemon.py`, `logger.py`.
@@ -173,7 +222,7 @@ All notable changes to this project, from its inception to the current secure st
 - **Refactored Config CLI**: Split `bw-proxy config` into explicit `get` and `update` subcommands for a more standard CLI experience.
 - **Config Get**: Added `bw-proxy config get` to view the full YAML-derived JSON, or `bw-proxy config get -m` to strictly fetch the current batch limit.
 - **Config Update**: Added `bw-proxy config update -m <N>` to programmatically tune the proxy.
-- **Native Versioning**: Added `--version` flag to the `bw-proxy` CLI to match the behavior of `bw-mcp version`.
+- **Native Versioning**: Added `--version` flag to the `bw-proxy` CLI to match the behavior of `bw-proxy version`.
 
 ## [v1.4.2] - 2026-03-02: CLI Configuration Management
 
@@ -198,13 +247,13 @@ All notable changes to this project, from its inception to the current secure st
 ## [v1.3.1] - 2026-03-01: The Daemon Evolution & Batch Upgrade
 
 ### ⚙️ Daemon Lifecycle Control
-- **Typer CLI Overhaul**: Refactored the core `bw-mcp` entry point (`__init__.py` -> `main.py`) from a bare `main()` into a fully-fledged Typer CLI with systemd-like daemon controls.
-- **PID File Management**: Created `daemon.py` to manage a stateful `~/.bw/mcp/bw-mcp.pid` tracking the live FastMCP stdio process.
+- **Typer CLI Overhaul**: Refactored the core `bw-proxy` entry point (`__init__.py` -> `main.py`) from a bare `main()` into a fully-fledged Typer CLI with systemd-like daemon controls.
+- **PID File Management**: Created `daemon.py` to manage a stateful `~/.bw/mcp/bw-proxy.pid` tracking the live FastMCP stdio process.
 - **Lifecycle Commands**: Introduced new subcommands for manual or automated control without breaking the core MCP protocol:
-  - `bw-mcp serve` (Default backward-compatible entrypoint for Gemini/Claude/Cursor)
-  - `bw-mcp status` (Check PID heartbeat)
-  - `bw-mcp stop` (Send SIGTERM)
-  - `bw-mcp restart` (Cleanly kill the stale process so the MCP client auto-respawns the new binary)
+  - `bw-proxy serve` (Default backward-compatible entrypoint for Gemini/Claude/Cursor)
+  - `bw-proxy status` (Check PID heartbeat)
+  - `bw-proxy stop` (Send SIGTERM)
+  - `bw-proxy restart` (Cleanly kill the stale process so the MCP client auto-respawns the new binary)
 - **Extensive Daemon Tests**: Implemented comprehensive unit tests (`test_daemon.py`) verifying state-checking and SIGTERM mocking.
 
 ### 📈 Scale & Tooling Improvements

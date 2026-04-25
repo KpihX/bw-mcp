@@ -1,9 +1,9 @@
 import pytest
 import json
 from unittest.mock import patch, MagicMock
-from bw_mcp.transaction import TransactionManager
-from bw_mcp.models import TransactionPayload
-from bw_mcp.subprocess_wrapper import SecureBWError
+from bw_proxy.transaction import TransactionManager
+from bw_proxy.models import TransactionPayload
+from bw_proxy.subprocess_wrapper import SecureBWError
 
 # Sample payload mimicking what the LLM generates
 # NOTE: delete_folder is excluded here because it must always be standalone (size 1).
@@ -20,11 +20,11 @@ TEST_PAYLOAD = {
     ]
 }
 
-@patch('bw_mcp.transaction.HITLManager.review_transaction')
-@patch('bw_mcp.transaction.HITLManager.ask_master_password')
-@patch('bw_mcp.transaction.SecureSubprocessWrapper.unlock_vault')
-@patch('bw_mcp.transaction.SecureSubprocessWrapper.execute')
-@patch('bw_mcp.transaction.SecureSubprocessWrapper.execute_json')
+@patch('bw_proxy.transaction.HITLManager.review_transaction')
+@patch('bw_proxy.transaction.HITLManager.ask_master_password')
+@patch('bw_proxy.transaction.SecureSubprocessWrapper.unlock_vault')
+@patch('bw_proxy.transaction.SecureSubprocessWrapper.execute')
+@patch('bw_proxy.transaction.SecureSubprocessWrapper.execute_json')
 def test_full_transaction_batch_execution(mock_exec_json, mock_exec, mock_unlock, mock_ask_pw, mock_review):
     """Mocks all HITL and Subprocess dependencies to rigorously test the Transaction routing engine."""
     
@@ -59,10 +59,10 @@ def test_full_transaction_batch_execution(mock_exec_json, mock_exec, mock_unlock
     # 7 operations total means execute was called 7 times (either direct or post-edit)
     assert mock_exec.call_count == 7
 
-@patch('bw_mcp.transaction.HITLManager.review_transaction')
-@patch('bw_mcp.transaction.HITLManager.ask_master_password')
-@patch('bw_mcp.transaction.SecureSubprocessWrapper.unlock_vault')
-@patch('bw_mcp.transaction.SecureSubprocessWrapper.execute_json')
+@patch('bw_proxy.transaction.HITLManager.review_transaction')
+@patch('bw_proxy.transaction.HITLManager.ask_master_password')
+@patch('bw_proxy.transaction.SecureSubprocessWrapper.unlock_vault')
+@patch('bw_proxy.transaction.SecureSubprocessWrapper.execute_json')
 def test_transaction_aborted_by_user(mock_exec_json, mock_unlock, mock_ask, mock_review):
     """Test what happens when a user clicks 'No' or closes the Zenity popup."""
     mock_review.return_value = False
@@ -73,9 +73,9 @@ def test_transaction_aborted_by_user(mock_exec_json, mock_unlock, mock_ask, mock
     result = TransactionManager.execute_batch(TEST_PAYLOAD)
     assert result == "Transaction aborted by the user."
 
-@patch('bw_mcp.transaction.HITLManager.review_transaction')
-@patch('bw_mcp.transaction.HITLManager.ask_master_password')
-@patch('bw_mcp.transaction.SecureSubprocessWrapper.unlock_vault')
+@patch('bw_proxy.transaction.HITLManager.review_transaction')
+@patch('bw_proxy.transaction.HITLManager.ask_master_password')
+@patch('bw_proxy.transaction.SecureSubprocessWrapper.unlock_vault')
 def test_transaction_unlock_failure(mock_unlock, mock_ask, mock_review):
     """Test what happens when the user types the wrong master password."""
     mock_review.return_value = True
@@ -91,11 +91,11 @@ def test_invalid_payload_rejected():
     result = TransactionManager.execute_batch(invalid_raw)
     assert "Error: Invalid transaction payload" in result
 
-@patch('bw_mcp.transaction.HITLManager.review_transaction')
-@patch('bw_mcp.transaction.HITLManager.ask_master_password')
-@patch('bw_mcp.transaction.SecureSubprocessWrapper.unlock_vault')
-@patch('bw_mcp.transaction.SecureSubprocessWrapper.execute')
-@patch('bw_mcp.transaction.SecureSubprocessWrapper.execute_json')
+@patch('bw_proxy.transaction.HITLManager.review_transaction')
+@patch('bw_proxy.transaction.HITLManager.ask_master_password')
+@patch('bw_proxy.transaction.SecureSubprocessWrapper.unlock_vault')
+@patch('bw_proxy.transaction.SecureSubprocessWrapper.execute')
+@patch('bw_proxy.transaction.SecureSubprocessWrapper.execute_json')
 def test_transaction_rollback_lifo(mock_exec_json, mock_exec, mock_unlock, mock_ask, mock_review):
     """Test that a mid-flight failure triggers compensating actions in reverse (LIFO) order."""
     mock_review.return_value = True

@@ -9,7 +9,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from bw_mcp.daemon import write_pid, read_pid, clear_pid, is_running
+from bw_proxy.daemon import write_pid, read_pid, clear_pid, is_running
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -19,8 +19,8 @@ from bw_mcp.daemon import write_pid, read_pid, clear_pid, is_running
 @pytest.fixture(autouse=True)
 def isolated_pid_dir(tmp_path):
     """Redirect all PID file operations to a temp directory during tests."""
-    pid_path = tmp_path / "bw-mcp.pid"
-    with patch("bw_mcp.daemon._pid_file_path", return_value=pid_path):
+    pid_path = tmp_path / "bw-proxy.pid"
+    with patch("bw_proxy.daemon._pid_file_path", return_value=pid_path):
         yield pid_path
 
 
@@ -86,27 +86,27 @@ def test_is_running_permission_error():
 # ─────────────────────────────────────────────────────────────────────────────
 
 from typer.testing import CliRunner
-from bw_mcp.main import app
+from bw_proxy.main import app
 
 runner = CliRunner()
 
 
 def test_cli_version():
-    """bw-mcp version exits 0 and prints the version string."""
+    """bw-proxy version exits 0 and prints the version string."""
     result = runner.invoke(app, ["version"])
     assert result.exit_code == 0
-    assert "BW-MCP" in result.output
+    assert "BW-Proxy" in result.output
 
 
 def test_cli_status_stopped():
-    """bw-mcp status exits 1 when no PID file exists."""
+    """bw-proxy status exits 1 when no PID file exists."""
     result = runner.invoke(app, ["status"])
     assert result.exit_code == 1
     assert "Stopped" in result.output
 
 
 def test_cli_status_running():
-    """bw-mcp status exits 0 when the PID file contains a live PID."""
+    """bw-proxy status exits 0 when the PID file contains a live PID."""
     write_pid(os.getpid())
     result = runner.invoke(app, ["status"])
     assert result.exit_code == 0
@@ -115,7 +115,7 @@ def test_cli_status_running():
 
 
 def test_cli_status_stale_pid():
-    """bw-mcp status detects and clears a stale PID (process dead)."""
+    """bw-proxy status detects and clears a stale PID (process dead)."""
     write_pid(999_999_999)  # certainly dead
     result = runner.invoke(app, ["status"])
     assert result.exit_code == 2
@@ -124,14 +124,14 @@ def test_cli_status_stale_pid():
 
 
 def test_cli_stop_not_running():
-    """bw-mcp stop is a no-op when there is no PID file."""
+    """bw-proxy stop is a no-op when there is no PID file."""
     result = runner.invoke(app, ["stop"])
     assert result.exit_code == 0
     assert "nothing to stop" in result.output
 
 
 def test_cli_stop_running():
-    """bw-mcp stop sends SIGTERM to the running PID."""
+    """bw-proxy stop sends SIGTERM to the running PID."""
     write_pid(os.getpid())
     with patch("os.kill") as mock_kill:
         result = runner.invoke(app, ["stop"])
@@ -141,14 +141,14 @@ def test_cli_stop_running():
 
 
 def test_cli_restart_not_running():
-    """bw-mcp restart is a no-op when there is no PID file."""
+    """bw-proxy restart is a no-op when there is no PID file."""
     result = runner.invoke(app, ["restart"])
     assert result.exit_code == 0
     assert "nothing to restart" in result.output
 
 
 def test_cli_restart_running():
-    """bw-mcp restart sends SIGTERM and clears the PID file."""
+    """bw-proxy restart sends SIGTERM and clears the PID file."""
     write_pid(os.getpid())
     with patch("os.kill") as mock_kill:
         result = runner.invoke(app, ["restart"])

@@ -310,6 +310,7 @@ class CreateItemAction(BaseAction):
     action: Literal[ItemAction.CREATE] = ItemAction.CREATE
     type: Literal[1, 2, 3, 4] = Field(description="1: Login, 2: SecureNote, 3: Card, 4: Identity")
     name: str
+    notes: Optional[str] = None
     folder_id: Optional[str] = None
     organization_id: Optional[str] = None
     favorite: bool = False

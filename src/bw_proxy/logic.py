@@ -1,9 +1,7 @@
 import json
-
-from mcp.server.fastmcp import FastMCP
 from typing import Dict, Any, List, Optional, Annotated
 
-from .config import load_config, MAX_BATCH_SIZE, REDACTED_POPULATED, AUDIT_MATCH_TAG, AUDIT_MISMATCH_TAG, MAX_AUDIT_SCAN_SIZE
+from .config import MAX_BATCH_SIZE, REDACTED_POPULATED, AUDIT_MATCH_TAG, AUDIT_MISMATCH_TAG, MAX_AUDIT_SCAN_SIZE
 from .subprocess_wrapper import SecureSubprocessWrapper, SecureBWError, SecureProxyError, _safe_error_message
 from .models import (
     BlindItem, BlindFolder, BlindOrganization, BlindOrganizationCollection, 
@@ -15,28 +13,176 @@ from .transaction import TransactionManager
 from .logger import TransactionLogger
 from .wal import WALManager
 from .ui import HITLManager
+from .session import SessionManager
 from .scrubber import deep_scrub_payload
+from .config import STATE_DIR
+import os
 
-# Load configuration (cached automatically)
-config = load_config()
-SERVER_NAME = config.get("proxy", {}).get("name", "BW-MCP")
+def _get_credentials(title: str) -> tuple[Optional[bytearray], Optional[bytearray]]:
+    """
+    Returns a fresh (master_password, session_key) pair for one operation.
+    No session key is loaded from disk or accepted from the parent environment.
+    """
+    # 1. ENSURE SERVER URL IS CORRECT
+    target_url = os.environ.get("BW_URL")
+    if target_url:
+        try:
+            current_url = SecureSubprocessWrapper.get_server()
+            # Basic normalization for comparison
+            if target_url.rstrip("/") not in current_url:
+                SecureSubprocessWrapper.set_server(target_url)
+        except Exception:
+            # If get_server fails (empty config), just set it
+            SecureSubprocessWrapper.set_server(target_url)
+    else:
+        # If no session and no URL, we might need to ask for URL if it's the first time
+        try:
+            if not SecureSubprocessWrapper.get_server():
+                url = HITLManager.ask_input("Bitwarden Server URL", "Initial Setup: URL", password=False)
+                if url:
+                    SecureSubprocessWrapper.set_server(url)
+                    os.environ["BW_URL"] = url
+        except Exception:
+             pass
 
-# Initialize Server with a system meta-prompt for immediate context & zero-latency alignment
-mcp = FastMCP(
-    SERVER_NAME,
-    instructions=f"""
-You are a Bitwarden Agent operating through a SECURE BLIND PROXY (Zero Trust). 
-**CRITICAL OPERATIONAL RULES:**
-1. AI-BLIND: Secrets are REDACTED as '{REDACTED_POPULATED}'. Do NOT attempt to read or modify them.
-2. BATCH LIMIT: Strictly limited to {MAX_BATCH_SIZE} operations per transaction to minimize race conditions.
-3. ACID ENGINE: Every transaction is Atomic (All-or-Nothing) and backed by a Write-Ahead Log (WAL).
-4. HUMAN-IN-THE-LOOP: provide a clear 'rationale' for every proposal to convince the human to approve.
-5. SELF-AUDIT: If a transaction crashes, use 'get_proxy_audit_context' and 'inspect_transaction_log' to diagnose and propose manual recovery steps.
-6. AUTO-SYNC: The proxy automatically and securely forces a 'bw sync' before ANY transaction or vault map retrieval to guarantee 100% data integrity. You never need to call sync yourself.
-"""
-)
+    # 2. DISCOVERY / LOGIN FLOW
+    email = os.environ.get("BW_EMAIL")
+    
+    if not email:
+        email = HITLManager.ask_input("Bitwarden Email", "Authentication Required", password=False)
+        if email: os.environ["BW_EMAIL"] = email
+    
+    master_password = HITLManager.ask_master_password(title=title)
+        
+    if not email or not master_password:
+        raise SecureProxyError("Authentication cancelled or missing required info (Email/Password).")
+        
+    try:
+        # Try login
+        session_key = SecureSubprocessWrapper.login_vault(email, master_password)
+        return master_password, session_key
+    except Exception as e:
+        # If login fails because we are already logged in but locked, try unlock
+        try:
+            session_key = SecureSubprocessWrapper.unlock_vault(master_password)
+            return master_password, session_key
+        except Exception:
+            raise SecureBWError(f"Authentication Failed: {str(e)}")
 
-@mcp.tool()
+def _wipe_credentials(mp: Optional[bytearray], sk: Optional[bytearray]):
+    """Memory-safe wiping of sensitive bytearrays."""
+    if sk is not None:
+        for i in range(len(sk)): sk[i] = 0
+    if mp is not None:
+        for i in range(len(mp)): mp[i] = 0
+
+def login(email: str) -> str:
+    """Manual login entrypoint."""
+    try:
+        mp = HITLManager.ask_master_password(title=f"Login: {email}")
+        if mp:
+            sk = SecureSubprocessWrapper.login_vault(email, mp)
+            _wipe_credentials(mp, sk)
+            return "SUCCESS: Logged in. Session key was not persisted; future operations will request the Master Password again."
+        return "Error: Password cancelled."
+    except Exception as e:
+        return _safe_error_message(e)
+
+def setup_automated() -> str:
+    """
+    Step-by-step automated setup and authentication.
+    Follows: URL -> EMAIL -> PASSWORD -> LOGIN/UNLOCK.
+    The resulting session key is validated, wiped, and never persisted.
+    """
+    try:
+        # 1. URL Discovery
+        url = os.environ.get("BW_URL")
+        if not url:
+            try:
+                # Only ask if not already set or purposefully changing
+                if not SecureSubprocessWrapper.get_server():
+                    url = HITLManager.ask_input("Bitwarden Server URL", "Setup: 1/3 Server URL", password=False)
+            except Exception:
+                url = HITLManager.ask_input("Bitwarden Server URL", "Setup: 1/3 Server URL", password=False)
+            
+            if url: os.environ["BW_URL"] = url
+        
+        if url:
+            try:
+                current = SecureSubprocessWrapper.get_server()
+                if url.rstrip("/") not in current:
+                    SecureSubprocessWrapper.set_server(url)
+            except SecureBWError as e:
+                # If we get "Logout required", it means a session is active.
+                # We can't change the server now, but we can proceed if the session works.
+                if "Logout required" in str(e):
+                    pass 
+                else:
+                    raise e
+            except Exception:
+                # Fallback to attempt set if get failed
+                SecureSubprocessWrapper.set_server(url)
+            # Verify it worked
+            actual = SecureSubprocessWrapper.get_server()
+            # Loose match to handle https:// vs vault.
+            if url.split("//")[-1].rstrip("/") not in actual:
+                return f"Error: Failed to set server to {url}. Current: {actual}."
+
+        # 2. Email Discovery
+        email = os.environ.get("BW_EMAIL")
+        if not email:
+            email = HITLManager.ask_input("Bitwarden Account Email", "Setup: 2/3 Account Email", password=False)
+            if email: os.environ["BW_EMAIL"] = email
+        
+        if not email:
+            return "Error: Email is required for setup."
+
+        # 3. Password / Login Discovery
+        mp = HITLManager.ask_master_password(title="Setup: 3/3 Master Password")
+        
+        if not mp:
+            return "Error: Master Password is required for setup."
+
+        # 4. Auth Execution
+        try:
+            # Try login first
+            sk = SecureSubprocessWrapper.login_vault(email, mp)
+            # NEVER save_session(sk)
+            _wipe_credentials(mp, sk)
+            return json.dumps({
+                "status": "success", 
+                "message": f"Setup complete. Logged in as {email}."
+            })
+        except Exception:
+            # Maybe already logged in? Try unlock
+            try:
+                sk = SecureSubprocessWrapper.unlock_vault(mp)
+                # NEVER save_session(sk)
+                _wipe_credentials(mp, sk)
+                return json.dumps({
+                    "status": "success",
+                    "message": f"Setup complete. Vault unlocked for {email}."
+                })
+            except Exception as e:
+                 _wipe_credentials(mp, None)
+                 return f"Error during setup authentication: {str(e)}"
+
+    except Exception as e:
+        return _safe_error_message(e)
+
+def logout() -> str:
+    """
+    Logout and clear session.
+    """
+    try:
+        # CLEAR PERSISTENCE
+        SessionManager.clear_session()
+        
+        res = SecureSubprocessWrapper.logout_vault()
+        return json.dumps({"status": "success", "message": res}, indent=2)
+    except Exception as e:
+        return f"Logout Failed: {_safe_error_message(e)}"
+
 def get_vault_map(
     search_items: Optional[str] = None,
     search_folders: Optional[str] = None,
@@ -48,28 +194,23 @@ def get_vault_map(
 ) -> str:
     """
     Retrieves the vault (Items and Folders) in a strictly sanitized format.
-    Supports advanced filtering (search_items, search_folders, folder_id, collection_id, organization_id) 
-    and a tri-state filter for the trash (trash_state="none", "only", or "all").
-    The agent CANNOT see passwords, TOTP tokens, or secure notes.
-    This action requires the Master Password once to unlock the vault temporarily.
     """
     master_password = None
     session_key = None
     try:
         try:
-            master_password = HITLManager.ask_master_password(title="Proxy Request: Read Vault Map")
-            session_key = SecureSubprocessWrapper.unlock_vault(master_password)
+            master_password, session_key = _get_credentials("Proxy Request: Read Vault Map")
             
-            recovery_msg = TransactionManager.check_recovery(master_password, session_key)
-            if recovery_msg:
-                return recovery_msg
+            if master_password:
+                recovery_msg = TransactionManager.check_recovery(master_password, session_key)
+                if recovery_msg:
+                    return recovery_msg
                 
         except Exception as e:
             return f"Access Denied or Recovery Failed: {_safe_error_message(e)}"
             
         items_base_args = ["list", "items"]
         if search_items: 
-            # DoS Prevention: Limit search string length
             search_items = search_items[:256]
             items_base_args.extend(["--search", search_items])
         if folder_id: items_base_args.extend(["--folderid", folder_id])
@@ -78,7 +219,6 @@ def get_vault_map(
         
         folders_base_args = ["list", "folders"]
         if search_folders:
-            # DoS Prevention: Limit search string length
             search_folders = search_folders[:256]
             folders_base_args.extend(["--search", search_folders])
         
@@ -90,7 +230,6 @@ def get_vault_map(
         collections = []
 
         if trash_state in ["none", "all"]:
-            # Fetch Active (Not deleted)
             raw_items = SecureSubprocessWrapper.execute_json(items_base_args, session_key)
             items = [BlindItem(**i).model_dump(exclude_unset=True) for i in raw_items]
             
@@ -98,7 +237,6 @@ def get_vault_map(
             folders = [BlindFolder(**f).model_dump(exclude_unset=True) for f in raw_folders]
             
         if trash_state in ["only", "all"]:
-            # Fetch Deleted (Trash) using the same filters
             trash_items_args = items_base_args + ["--trash"]
             raw_trash_items = SecureSubprocessWrapper.execute_json(trash_items_args, session_key)
             trash_items = [BlindItem(**i).model_dump(exclude_unset=True) for i in raw_trash_items]
@@ -109,14 +247,12 @@ def get_vault_map(
         
         if include_orgs:
             try:
-                # Organizations can fail if user doesn't belong to any or if CLI returns error
                 raw_orgs = SecureSubprocessWrapper.execute_json(["list", "organizations"], session_key)
                 organizations = [BlindOrganization(**o).model_dump(exclude_unset=True) for o in raw_orgs]
                 
                 raw_cols = SecureSubprocessWrapper.execute_json(["list", "org-collections"], session_key)
                 collections = [BlindOrganizationCollection(**c).model_dump(exclude_unset=True) for c in raw_cols]
             except Exception:
-                # Silently ignore org failures to allow personal vault access
                 organizations = []
                 collections = []
         
@@ -133,7 +269,6 @@ def get_vault_map(
             }
         }
         
-        # For simplicity in MCP text context
         return json.dumps(result, indent=2)
         
     except SecureBWError as e:
@@ -141,95 +276,32 @@ def get_vault_map(
     except Exception as e:
         return f"Proxy Internal Error during serialization: {_safe_error_message(e)}"
     finally:
-        # Clean session key and master password from memory securely
         if session_key is not None:
-            for i in range(len(session_key)):
-                session_key[i] = 0
+            for i in range(len(session_key)): session_key[i] = 0
             del session_key
         if master_password is not None:
-            for i in range(len(master_password)):
-                master_password[i] = 0
+            for i in range(len(master_password)): master_password[i] = 0
             del master_password
 
-@mcp.tool()
 def propose_vault_transaction(rationale: str, operations: List[Dict[str, Any]]) -> str:
     """
-    Propose a batch of modifications to the vault. Very strict schemas apply.
-    
-    [🛡️ ACID & WAL RESILIENCE]
-    The transaction runs locally in RAM via a "Virtual Vault Mode". 
-    If validation passes, a Write-Ahead Log is created. 
-    Only then is the 'bw' CLI executed. If the proxy process is killed mid-flight, 
-    the system auto-recovers natively (LIFO rollback) on the next operation!
-    
-    [🔢 BATCH LIMITS]
-    Strictly follow the batch size limits defined in your system instructions. 
-    Reason: Every operation in a batch extends the time window during which an external Bitwarden client
-    (mobile app, web vault) could modify the same items. The longer the window, the higher the probability
-    that a rollback command will fail with 'Item not found', leaving the vault in an inconsistent state.
-    If you need more operations, split them into sequential calls to this tool.
-    
-    The payload must be a JSON object containing:
-      - "rationale": A string explaining why these changes are being made.
-      - "operations": A list of operation objects. Each object MUST have an "action" field matching ONE of:
-      
-          [ITEM ACTIONS]
-          1. "create_item" -> Requires: type (1-4), name. Optional: folder_id, organization_id, login, card, identity. SECRETS FORBIDDEN.
-          2. "rename_item" -> Requires: target_id (str), new_name (str)
-          3. "move_item" -> Requires: target_id (str), folder_id (str or null)
-          4. "delete_item" -> Requires: target_id (str). WARNING: Destructive.
-          5. "restore_item" -> Requires: target_id (str). Restores from trash.
-          6. "favorite_item" -> Requires: target_id (str), favorite (bool)
-          7. "move_to_collection" -> Requires: target_id (str), organization_id (str).
-          8. "toggle_reprompt" -> Requires: target_id (str), reprompt (bool).
-          9. "delete_attachment" -> Requires: target_id (str), attachment_id (str). 
-             WARNING: Destructive & UNRECOVERABLE. MUST be the ONLY operation in the batch.
-          
-          [FOLDER ACTIONS]
-          Note: Bitwarden folders are flat. They act like mutually exclusive tags (an item can only be in one folder). You CANNOT place a folder inside another folder. Therefore, folders cannot be "moved" or "restored" from trash, only created, renamed, or deleted.
-          9.  "create_folder" -> Requires: name (str)
-          10. "rename_folder" -> Requires: target_id (str), new_name (str)
-          11. "delete_folder" -> Requires: target_id (str).
-              WARNING: DISRUPTIVE & MUST be the ONLY operation in a batch of size 1.
-              Bitwarden folders have NO trash. Deleting a folder is a hard delete.
-              All items inside will lose their folder reference (become un-foldered).
-              This action CANNOT be bundled with any other operation.
-          
-          [EDIT ACTIONS]
-          12. "edit_item_login" -> Requires: target_id, and optional 'username' or 'uris'. 
-          13. "edit_item_card" -> Requires: target_id, and optional 'cardholderName', 'brand', 'expMonth', 'expYear'. 
-          14. "edit_item_identity" -> Requires: target_id, and optional 'title', 'firstName', 'email', 'phone', etc.
-          15. "upsert_custom_field" -> Requires: target_id (str), name (str), value (str), type (int: 0 for Text, 2 for Boolean).
-          16. "vault_refactor" -> Requires: refactor_action ("move", "copy", "delete"), source_item_id, scope ("field", "user", "pass", "totp", "note"), key. Optional: dest_item_id, dest_key.
-          
-          Note: YOU CANNOT PASS SENSITIVE FIELDS ('password', 'totp', 'number', 'code', 'ssn', 'value' of hidden fields). ATTEMPTING TO DO SO WILL FAIL VALIDATION.
-          
-    This tool DOES NOT execute immediately. It shows a popup to the user detailing
-    the operations. The user must explicitly type their Master Password to approve 
-    and execute the batch transaction. Destructive actions trigger RED ALERTS.
+    Propose a batch of modifications to the vault.
     """
     payload = {
         "rationale": rationale,
         "operations": operations
     }
     try:
-        # Pass the raw dictionary to the Transaction Manager
         return TransactionManager.execute_batch(payload)
     except Exception as e:
         return f"Proxy Error processing transaction: {_safe_error_message(e)}"
 
-@mcp.tool()
 def get_proxy_audit_context(limit: int = 5) -> str:
     """
-    Returns the current operational status of the BW-MCP.
-    Use this to check for 'Write-Ahead Log' (WAL) orphans and recent log history.
-    
-    Call this tool if you encounter a transaction failure or if you 
-    need to synchronize your internal state with the system's audit trail.
+    Returns the current operational status of the BW-Proxy.
     """
-    
     has_wal = WALManager.has_pending_transaction()
-    wal_status_msg = "CLEAN (Vault is synchronized)" if not has_wal else "PENDING (A transaction crashed and is awaiting auto-recovery. Do NOT send new operations yet.)"
+    wal_status_msg = "CLEAN (Vault is synchronized)" if not has_wal else "PENDING (A transaction crashed and is awaiting auto-recovery.)"
     
     recent_logs = TransactionLogger.get_recent_logs_summary(limit)
     
@@ -241,20 +313,10 @@ def get_proxy_audit_context(limit: int = 5) -> str:
     
     return json.dumps(context, indent=2)
 
-@mcp.tool()
 def inspect_transaction_log(tx_id: str = None, n: int = None) -> str:
     """
     Fetches the COMPLETE detailed JSON payload of a specific transaction log.
-    If a transaction failed or rolled back, use this to read the `execution_trace`,
-    `rollback_trace`, and `error_message` to understand what went wrong.
-    
-    Args:
-        tx_id: The UUID mapping to the transaction (matches by exact string or prefix).
-        n: The index of the log to fetch (1 = the absolute most recent log, 2 = the second most recent, etc.).
-        
-    If BOTH arguments are empty, it defaults to returning the most recent log (n=1).
     """
-    
     try:
         log_data = TransactionLogger.get_log_details(tx_id=tx_id, n=n)
         return json.dumps(log_data, indent=2)
@@ -263,27 +325,19 @@ def inspect_transaction_log(tx_id: str = None, n: int = None) -> str:
     except Exception as e:
         return f"Unexpected Error reading log: {_safe_error_message(e)}"
 
-@mcp.tool()
 def compare_secrets_batch(payload: BatchComparePayload) -> str:
     """
-    BLIND AUDIT PRIMITIVE: Safely compares secret fields (passwords, TOTPs, URIs, notes)
-    between two vault items without EVER exposing the text to you (the LLM).
-    Useful for deduplication audits or confirming successful migrations.
-    Returns highly structured JSON with matching statuses.
+    BLIND AUDIT PRIMITIVE: Safely compares secret fields.
     """
     master_password = None
     session_key = None
     try:
-        # 1. Unlock sequence (Password-First)
-        master_password = HITLManager.ask_master_password(title="Unlock Vault for Secret Audit")
-        session_key = SecureSubprocessWrapper.unlock_vault(master_password)
+        master_password, session_key = _get_credentials("Unlock Vault for Secret Audit")
         
-        # 2. Safety recovery check
         recovery_msg = TransactionManager.check_recovery(master_password, session_key)
         if recovery_msg:
             return recovery_msg
 
-        # 3. Resolve Names for HITL review
         id_to_name = {}
         try:
             raw_items = SecureSubprocessWrapper.execute_json(["list", "items"], session_key)
@@ -293,7 +347,6 @@ def compare_secrets_batch(payload: BatchComparePayload) -> str:
         except Exception:
             pass
             
-        # 4. HITL Review
         if not HITLManager.review_comparisons(payload, id_to_name):
             return json.dumps({"status": "ABORTED", "message": "Audit cancelled by user."})
         
@@ -322,16 +375,9 @@ def compare_secrets_batch(payload: BatchComparePayload) -> str:
     except Exception as e:
         return f"Proxy Error during audit: {_safe_error_message(e)}"
     finally:
-        if session_key is not None:
-            for i in range(len(session_key)): session_key[i] = 0
-            del session_key
-        if master_password is not None:
-            for i in range(len(master_password)):
-                master_password[i] = 0
-            del master_password
+        _wipe_credentials(master_password, session_key)
 
-
-def _fetch_template(template_type: str) -> str:
+def fetch_template(template_type: str) -> str:
     """
     Fetches the JSON schema for a specific Bitwarden template type.
     """
@@ -344,11 +390,8 @@ def _fetch_template(template_type: str) -> str:
     master_password = None
     session_key = None
     try:
-        # 1. Unlock sequence (Password-First)
-        master_password = HITLManager.ask_master_password(title=f"Unlock Vault for {valid_type.value} schema")
-        session_key = SecureSubprocessWrapper.unlock_vault(master_password)
+        master_password, session_key = _get_credentials(f"Unlock Vault for {valid_type.value} schema")
         
-        # 2. Safety recovery check
         recovery_msg = TransactionManager.check_recovery(master_password, session_key)
         if recovery_msg:
             return recovery_msg
@@ -359,7 +402,7 @@ def _fetch_template(template_type: str) -> str:
         return json.dumps({
             "_metadata": {
                 "source": f"bw get template {valid_type.value}",
-                "note": "Secret fields have been proactively redacted by BW-MCP to maintain AI-Blindness. Empty fields remain empty."
+                "note": "Secret fields have been proactively redacted by BW-Proxy to maintain AI-Blindness."
             },
             "template": safe_data
         }, indent=2)
@@ -368,39 +411,25 @@ def _fetch_template(template_type: str) -> str:
     except Exception as e:
         return f"Proxy Error: {_safe_error_message(e)}"
     finally:
-        if session_key is not None:
-            for i in range(len(session_key)): session_key[i] = 0
-            del session_key
-        if master_password is not None:
-            for i in range(len(master_password)):
-                master_password[i] = 0
-            del master_password
+        _wipe_credentials(master_password, session_key)
 
-@mcp.tool()
 def find_item_duplicates(payload: Annotated[FindDuplicatesPayload, "The duplication scan request."]) -> str:
     """
     Finds items sharing the same secret value as a target item.
-    Supports dynamic field pathing (e.g. login.password, notes, fields.API_KEY).
-    Self-bypass enabled for scan_limit.
     """
     master_password = None
     session_key = None
     try:
-        # 1. Unlock sequence (Password-First)
-        master_password = HITLManager.ask_master_password(title="Unlock Vault for Duplicate Scan")
-        session_key = SecureSubprocessWrapper.unlock_vault(master_password)
+        master_password, session_key = _get_credentials("Unlock Vault for Duplicate Scan")
 
-        # 2. Safety recovery check
         recovery_msg = TransactionManager.check_recovery(master_password, session_key)
         if recovery_msg:
             return recovery_msg
 
-        # 3. Resolve target name for HITL review
         id_to_name = {}
         target_item = None
         raw_items = []
         try:
-            # 💡 Execution Order: Fetch items list THEN specific item for name resolution
             raw_items = SecureSubprocessWrapper.execute_json(["list", "items"], session_key)
             target_item = SecureSubprocessWrapper.execute_json(["get", "item", payload.target_id], session_key)
             if target_item:
@@ -408,11 +437,9 @@ def find_item_duplicates(payload: Annotated[FindDuplicatesPayload, "The duplicat
         except Exception:
             pass
 
-        # 4. Human-in-the-loop review
         if not HITLManager.review_duplicate_scan(payload, id_to_name):
             return json.dumps({"status": "error", "message": "Operation aborted by user."})
 
-        # 5. Candidate Discovery
         candidates = payload.candidate_ids
         total_found = 0
         if not candidates:
@@ -428,7 +455,6 @@ def find_item_duplicates(payload: Annotated[FindDuplicatesPayload, "The duplicat
         else:
             total_found = len(candidates)
 
-        # 6. Blind Execution
         matches = SecureSubprocessWrapper.audit_bulk_compare(
             target_id=payload.target_id,
             field_path=payload.field,
@@ -447,33 +473,21 @@ def find_item_duplicates(payload: Annotated[FindDuplicatesPayload, "The duplicat
     except Exception as e:
         return json.dumps({"status": "error", "message": f"Proxy Error: {_safe_error_message(e)}"})
     finally:
-        if session_key is not None:
-            for i in range(len(session_key)): session_key[i] = 0
-            del session_key
-        if master_password is not None:
-            for i in range(len(master_password)):
-                master_password[i] = 0
-            del master_password
+        _wipe_credentials(master_password, session_key)
 
-@mcp.tool()
 def find_duplicates_batch(payload: FindDuplicatesBatchPayload) -> str:
     """
     Finds duplicates for multiple targets in a single sweep.
-    Best for cleaning up the vault without multiple master password prompts.
     """
     master_password = None
     session_key = None
     try:
-        # 1. Unlock sequence (Password-First)
-        master_password = HITLManager.ask_master_password(title="Unlock Vault for Duplicate Batch Audit")
-        session_key = SecureSubprocessWrapper.unlock_vault(master_password)
+        master_password, session_key = _get_credentials("Unlock Vault for Duplicate Batch Audit")
 
-        # 2. Safety recovery check
         recovery_msg = TransactionManager.check_recovery(master_password, session_key)
         if recovery_msg:
             return recovery_msg
 
-        # 3. Resolve names for HITL review
         id_to_name = {}
         try:
             raw_items = SecureSubprocessWrapper.execute_json(["list", "items"], session_key)
@@ -485,15 +499,12 @@ def find_duplicates_batch(payload: FindDuplicatesBatchPayload) -> str:
         except Exception:
             pass
 
-        # 4. Review Request
         if not HITLManager.review_duplicate_scan(payload, id_to_name):
             return "Operation aborted by user."
 
-        # 5. Candidate Discovery
         candidates = payload.candidate_ids
         total_found = 0
         if not candidates:
-            # We fetch once for the whole batch
             raw_items = SecureSubprocessWrapper.execute_json(["list", "items"], session_key)
             all_potential = [i["id"] for i in raw_items]
             total_found = len(all_potential)
@@ -502,7 +513,6 @@ def find_duplicates_batch(payload: FindDuplicatesBatchPayload) -> str:
         else:
             total_found = len(candidates)
 
-        # 6. Preparation for multi-target scan
         prep = []
         for t in payload.targets:
             prep.append({
@@ -511,7 +521,6 @@ def find_duplicates_batch(payload: FindDuplicatesBatchPayload) -> str:
                 "candidate_path": t.candidate_field or t.field
             })
 
-        # 7. Execute Multi-Audit
         results = SecureSubprocessWrapper.audit_multi_target_compare(
             prep, candidates, session_key
         )
@@ -526,55 +535,28 @@ def find_duplicates_batch(payload: FindDuplicatesBatchPayload) -> str:
     except Exception as e:
         return f"Proxy Error: {_safe_error_message(e)}"
     finally:
-        if session_key is not None:
-            for i in range(len(session_key)): session_key[i] = 0
-            del session_key
-        if master_password is not None:
-            for i in range(len(master_password)):
-                master_password[i] = 0
-            del master_password
+        _wipe_credentials(master_password, session_key)
 
-@mcp.tool()
-def get_template(template_type: TemplateType) -> str:
-    """
-    Retrieves the pure JSON schema template for a Bitwarden entity type.
-    Crucial for autonomous agents needing to understand valid fields before creating/editing items.
-    """
-    return _fetch_template(template_type.value)
-
-@mcp.resource("bw://templates/{template_type}")
-def template_resource(template_type: str) -> str:
-    """Read a Bitwarden entity template schema (e.g. bw://templates/item.login)"""
-    return _fetch_template(template_type)
-
-@mcp.tool()
 def find_all_vault_duplicates(payload: Annotated[FindAllDuplicatesPayload, "The total vault collision scan request."]) -> str:
     """
-    Scans the entire vault for ANY items sharing secret values (passwords, notes, identical custom fields).
-    This is a deep audit tool for identifying overall secret reuse patterns.
+    Scans the entire vault for ANY items sharing secret values.
     """
     master_password = None
     session_key = None
     try:
-        # 1. Unlock sequence (Password-First)
-        master_password = HITLManager.ask_master_password(title="Unlock Vault for Global Collision Scan")
-        session_key = SecureSubprocessWrapper.unlock_vault(master_password)
+        master_password, session_key = _get_credentials("Unlock Vault for Global Collision Scan")
 
-        # 2. Safety recovery check
         recovery_msg = TransactionManager.check_recovery(master_password, session_key)
         if recovery_msg:
             return recovery_msg
 
-        # 3. Target discovery (all items)
         limit = payload.scan_limit if payload.scan_limit is not None else MAX_AUDIT_SCAN_SIZE
         raw_items = SecureSubprocessWrapper.execute_json(["list", "items"], session_key)
         all_ids = [i["id"] for i in raw_items][:limit]
 
-        # 4. Human-in-the-loop review
         if not HITLManager.review_duplicate_scan(payload, {}):
              return json.dumps({"status": "error", "message": "Operation aborted by user."})
 
-        # 5. Blind Execution (Special Trigger)
         special_target = [{
             "target_id": "ffffffff-ffff-ffff-ffff-ffffffffffff",
             "target_path": "notes"
@@ -591,48 +573,23 @@ def find_all_vault_duplicates(payload: Annotated[FindAllDuplicatesPayload, "The 
     except Exception as e:
         return json.dumps({"status": "error", "message": f"Proxy Error: {_safe_error_message(e)}"})
     finally:
-        if session_key is not None:
-            for i in range(len(session_key)): session_key[i] = 0
-            del session_key
-        if master_password is not None:
-            for i in range(len(master_password)):
-                master_password[i] = 0
-            del master_password
+        _wipe_credentials(master_password, session_key)
 
-@mcp.tool()
-def refactor_item_secrets(
-    rationale: str,
-    operations: List[Dict[str, Any]]
-) -> str:
+def refactor_item_secrets(rationale: str, operations: List[Dict[str, Any]]) -> str:
     """
     BLIND REFACTORING: Move, Copy, or Delete secret fields between items securely.
-    The secret values are NEVER exposed to you (the LLM). 
-    Use this to migrate passwords to different items, move common keys to a shared item,
-    or clean up legacy fields without ever knowing the actual secret.
-
-    [🛡️ ACID SAFETY]
-    Refactoring is integrated into the transaction engine. A rollback restores both
-    the source and destination items if any operation in the batch fails.
-
-    [🔢 OPERATIONS]
-    Each operation must have:
-      - "action": "vault_refactor"
-      - "refactor_action": "move", "copy", or "delete"
-      - "source_item_id": UUID of the source item.
-      - "scope": "field" (custom field), "user", "pass", "totp", or "note".
-      - "key": Field name (for 'field' scope) or identifier.
-      - "dest_item_id": (Required for MOVE/COPY) UUID of the target item.
-      - "dest_key": (Optional) Rename the field in the destination.
     """
+    # Ensure all operations have the correct 'action' for Pydantic discriminator
+    from .models import EditAction
+    for op in operations:
+        if "action" not in op:
+            op["action"] = EditAction.REFACTOR
+            
     payload = {
         "rationale": rationale,
         "operations": operations
     }
-    return TransactionManager.execute_batch(payload)
-
-def main():
-    """Entry point for the script."""
-    mcp.run()
-
-if __name__ == "__main__":
-    main()
+    try:
+        return TransactionManager.execute_batch(payload)
+    except Exception as e:
+        return f"Proxy Error processing refactor: {_safe_error_message(e)}"

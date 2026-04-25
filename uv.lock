@@ -43,8 +43,8 @@ wheels = [
 ]
 
 [[package]]
-name = "bw-mcp"
-version = "2.0.0rc1"
+name = "bw-proxy"
+version = "2.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },

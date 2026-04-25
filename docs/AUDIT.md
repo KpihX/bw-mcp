@@ -2,7 +2,7 @@
 
 > **Date:** 2026-03-02  
 > **Auditor:** Automated Deep-Scan (5-pass systematic review)  
-> **Scope:** All source files in `src/bw_mcp/`, all CLI commands, all LLM-facing tool outputs, all disk I/O, all RAM lifecycle.  
+> **Scope:** All source files in `src/bw_proxy/`, all CLI commands, all LLM-facing tool outputs, all disk I/O, all RAM lifecycle.  
 > **Verdict:** ✅ **ZERO exploitable vulnerabilities identified.** 84/84 tests pass.
 
 ---
@@ -176,11 +176,10 @@ Permissions: chmod 600
 
 | Command               | Output                 | Protection                          | Status |
 | :-------------------- | :--------------------- | :---------------------------------- | :----- |
-| `bw-admin logs`       | Log summary table      | Only metadata (no secrets)          | ✅      |
-| `bw-admin log`        | Full log JSON          | Logs already scrubbed at write time | ✅      |
-| `bw-admin wal`        | Decrypted WAL          | `deep_scrub_payload(wal_data)`      | ✅      |
-| `bw-admin wal` (fail) | Error message          | Fixed string, no `str(e)`           | ✅      |
-| `bw-admin purge`      | Deletion confirmations | No secret content                   | ✅      |
+| `bw-proxy admin log view`   | Log summary/full JSON  | Only scrubbed metadata/details      | ✅      |
+| `bw-proxy admin wal view`   | Decrypted WAL          | Sanitized rollback commands         | ✅      |
+| `bw-proxy admin wal` (fail) | Error message          | Fixed string, no `str(e)`           | ✅      |
+| `bw-proxy admin log purge`  | Deletion confirmations | No secret content                   | ✅      |
 
 ### What stays in RAM
 
@@ -239,7 +238,7 @@ Every `str(e)` occurrence in the codebase was manually classified:
 | #    | Vulnerability                                                                         | File                    | Fix Applied                                                         |
 | :--- | :------------------------------------------------------------------------------------ | :---------------------- | :------------------------------------------------------------------ |
 | M1   | `failed_op` dict returned unscrubbed to LLM — could contain `password`, `totp` values | `transaction.py:209`    | Added `deep_scrub_payload(failed_op)` before returning              |
-| M2   | CLI `bw-admin wal view` displayed raw decrypted WAL data on screen                     | `cli.py:88`             | Added `deep_scrub_payload(wal_data)` before display                 |
+| M2   | CLI `bw-proxy admin wal view` displayed raw decrypted WAL data on screen               | `cli.py:88`             | Added `deep_scrub_payload(wal_data)` before display                 |
 | M3   | `subprocess stdout` captured as `str` (immutable) — session key lingered in RAM       | `subprocess_wrapper.py` | Changed to `text=False`, capture as `bytes`, convert to `bytearray` |
 
 ### Low Findings (Fixed)
@@ -259,7 +258,7 @@ Every `str(e)` occurrence in the codebase was manually classified:
 | S3   | Incomplete Error Clean-up: `master_password` in `cli.py` could trigger ReferenceError on failed decryption | `cli.py:140,169`         | Added `if 'master_password' in locals()` to ensure safe cleaning in `finally` blocks.    |
 | B1   | `bw move` Syntax: Command failed due to missing encoded JSON for organization collections                  | `transaction.py:405`     | Implemented Base64 JSON-array encoding for `collection_ids` argument.                    |
 | B2   | Shadowing/Scoping: `import base64` inside closure caused `NameError` during rollback                       | `transaction.py:314,403` | Removed redundant local imports and moved all dependencies to module scope.              |
-| **1.9.1** | **Sovereign Pattern: Root-Owned Code, User-Owned Data**                                           | `Makefile`, `ui.py`      | Implemented `/opt/bw-mcp` install with AppArmor jail and strict `~/.bw/mcp` scoping.      |
+| **1.9.1** | **Sovereign Pattern: Root-Owned Code, User-Owned Data**                                           | `Makefile`, `ui.py`      | Implemented `/opt/bw-proxy` install with AppArmor jail and strict state-directory scoping.      |
 
 ---
 
@@ -321,7 +320,7 @@ The 480,000 iteration count transforms a 6-hour attack into a multi-century one.
 | Risk                                                           | Severity     | Reason we accept it                                                                                                              | Mitigation                                                           |
 | :------------------------------------------------------------- | :----------- | :------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------- |
 | `os.environ` values cannot be wiped from Python `str` heap     | Low          | Python forces `str` for env dict values. We overwrite with `"DEADBEEF"` and `del`, but the GC determines actual memory release.  | Best-effort overwrite. Session is ephemeral (~ms lifetime).          |
-| Typer prompt returns `str` (immutable) for CLI Master Password | Low          | Typer's API cannot return `bytes`. We immediately cast to `bytearray`, overwrite the `str` ref with `"DEADBEEF"`, and `del`.     | Exposure window is <1ms. Only occurs for `bw-admin wal view` CLI command. |
+| Typer prompt returns `str` (immutable) for CLI Master Password | Low          | Typer's API cannot return `bytes`. We immediately cast to `bytearray`, overwrite the `str` ref with `"DEADBEEF"`, and `del`.     | Exposure window is <1ms. Only occurs for `bw-proxy admin wal view` CLI command. |
 | Python GC non-determinism                                      | Very Low     | We cannot force garbage collection on specific objects. Our `bytearray` zeroing mitigates this for all hot-path secrets.         | `bytearray` zeroing is the industry-standard Python mitigation.      |
 | Bitwarden CLI itself handles secrets in memory                 | Out of scope | The `bw` binary is closed-source. We treat it as a black box.                                                                    | We minimize what we pass to it and wipe everything we receive.       |
 | **Enterprise Rollback Failure (`move_to_collection`)**         | Edge Case    | If Enterprise Policy blocks moving secrets *out* of an org, an un-privileged user's `bw edit` rollback will be rejected via API. | The Subprocess safely catches the exception and relays the denial.   |

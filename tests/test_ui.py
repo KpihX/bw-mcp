@@ -1,6 +1,6 @@
 import pytest
-from bw_mcp.ui import HITLManager
-from bw_mcp.models import (
+from bw_proxy.ui import HITLManager
+from bw_proxy.models import (
     TransactionPayload, 
     RenameItemAction, 
     RestoreItemAction,
@@ -35,7 +35,7 @@ def test_ui_contains_destructive_alert():
         operations=[DeleteFolderAction(target_id="2")]
     )
     
-    with patch('bw_mcp.ui.subprocess.run') as mock_run:
+    with patch('bw_proxy.ui.subprocess.run') as mock_run:
         mock_run.return_value = MagicMock(returncode=0)
         
         HITLManager.review_transaction(payload)
@@ -54,7 +54,7 @@ def test_ui_no_destructive_alert():
         operations=[RenameItemAction(target_id="1", new_name="Safe")]
     )
     
-    with patch('bw_mcp.ui.subprocess.run') as mock_run:
+    with patch('bw_proxy.ui.subprocess.run') as mock_run:
         mock_run.return_value = MagicMock(returncode=0)
         
         HITLManager.review_transaction(payload)
@@ -71,7 +71,7 @@ def test_ui_escaping_special_characters():
         operations=[RenameItemAction(target_id="1", new_name="A & B < C > D")]
     )
     
-    with patch('bw_mcp.ui.subprocess.run') as mock_run:
+    with patch('bw_proxy.ui.subprocess.run') as mock_run:
         mock_run.return_value = MagicMock(returncode=0)
         
         HITLManager.review_transaction(payload, id_to_name={"1": "Me & You"})

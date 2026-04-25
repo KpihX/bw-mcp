@@ -445,28 +445,30 @@ class TransactionManager:
             item_tpl["folderId"] = op.folder_id
             item_tpl["organizationId"] = op.organization_id
             item_tpl["favorite"] = op.favorite
-            # Crucially empty the notes template to avoid accidental secrets
-            item_tpl["notes"] = None
+            # Use provided notes or ensure it's empty
+            item_tpl["notes"] = op.notes if op.notes else None
             
-            if op.type == 1 and op.login:
-                login_tpl = SecureSubprocessWrapper.execute_json(["get", "template", "item.login"], session_key)
-                if op.login.username is not None: login_tpl["username"] = op.login.username
-                if op.login.uris is not None: login_tpl["uris"] = op.login.uris
-                item_tpl["login"] = login_tpl
-            elif op.type == 3 and op.card:
-                card_tpl = SecureSubprocessWrapper.execute_json(["get", "template", "item.card"], session_key)
-                if op.card.cardholderName is not None: card_tpl["cardholderName"] = op.card.cardholderName
-                if op.card.brand is not None: card_tpl["brand"] = op.card.brand
-                if op.card.expMonth is not None: card_tpl["expMonth"] = op.card.expMonth
-                if op.card.expYear is not None: card_tpl["expYear"] = op.card.expYear
-                item_tpl["card"] = card_tpl
-            elif op.type == 4 and op.identity:
-                id_tpl = SecureSubprocessWrapper.execute_json(["get", "template", "item.identity"], session_key)
-                # Apply non-None fields
-                for k, v in op.identity.model_dump(exclude_none=True).items():
-                    if k in id_tpl:
-                        id_tpl[k] = v
-                item_tpl["identity"] = id_tpl
+            if op.type == 1:
+                item_tpl["login"] = SecureSubprocessWrapper.execute_json(["get", "template", "item.login"], session_key)
+                if op.login:
+                    if op.login.username is not None: item_tpl["login"]["username"] = op.login.username
+                    if op.login.uris is not None: item_tpl["login"]["uris"] = op.login.uris
+            elif op.type == 2:
+                # Secure Note
+                item_tpl["secureNote"] = SecureSubprocessWrapper.execute_json(["get", "template", "item.secureNote"], session_key)
+            elif op.type == 3:
+                item_tpl["card"] = SecureSubprocessWrapper.execute_json(["get", "template", "item.card"], session_key)
+                if op.card:
+                    if op.card.cardholderName is not None: item_tpl["card"]["cardholderName"] = op.card.cardholderName
+                    if op.card.brand is not None: item_tpl["card"]["brand"] = op.card.brand
+                    if op.card.expMonth is not None: item_tpl["card"]["expMonth"] = op.card.expMonth
+                    if op.card.expYear is not None: item_tpl["card"]["expYear"] = op.card.expYear
+            elif op.type == 4:
+                item_tpl["identity"] = SecureSubprocessWrapper.execute_json(["get", "template", "item.identity"], session_key)
+                if op.identity:
+                    for k, v in op.identity.model_dump(exclude_none=True).items():
+                        if k in item_tpl["identity"]:
+                            item_tpl["identity"][k] = v
                 
             # bw create requires base64-encoded JSON
             encoded_b64 = base64.b64encode(json.dumps(item_tpl).encode()).decode()

@@ -1,6 +1,7 @@
 import json
-from bw_mcp.server import mcp, get_proxy_audit_context, inspect_transaction_log
-from bw_mcp.config import MAX_BATCH_SIZE, REDACTED_POPULATED
+from bw_proxy.server import mcp
+from bw_proxy.logic import get_proxy_audit_context, inspect_transaction_log
+from bw_proxy.config import MAX_BATCH_SIZE, REDACTED_POPULATED
 
 def test_mcp_meta_prompt_instructions():
     # Verify that the core security rules are presence in the server instructions

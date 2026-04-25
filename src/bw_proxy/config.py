@@ -5,6 +5,29 @@ from functools import lru_cache
 
 CONFIG_PATH = Path(__file__).resolve().parent / "config.yaml"
 
+def _load_dotenv():
+    """
+    Primitive .env loader to avoid external dependencies.
+    Searches in current working directory and project root.
+    """
+    dotenv_paths = [Path.cwd() / ".env", Path(__file__).resolve().parents[2] / ".env"]
+    for path in dotenv_paths:
+        if path.exists() and path.is_file():
+            with open(path, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    key, val = line.split("=", 1)
+                    key = key.strip()
+                    val = val.strip().strip('"').strip("'")
+                    if key and val and key not in os.environ:
+                        os.environ[key] = val
+            break
+
+# Ingest environment variables from .env before constants are defined
+_load_dotenv()
+
 @lru_cache(maxsize=1)
 def load_config(config_path=CONFIG_PATH, **overrides) -> dict:
     """
@@ -79,9 +102,13 @@ REDACTED_POPULATED = _config_cache.get("redaction", {}).get("populated_tag", "[R
 REDACTED_EMPTY = _config_cache.get("redaction", {}).get("empty_tag", "[REDACTED_BY_PROXY_EMPTY]")
 
 # Final path resolution for logging and WAL
-default_state_dir = "~/.bw/mcp"
+# Priority: 1. ENV: BW_PROXY_DATA, 2. proxy.state_directory from YAML, 3. ~/.bw/proxy
+default_state_dir = "~/.bw/proxy"
 proxy_config = _config_cache.get("proxy", {})
-STATE_DIR = os.path.expanduser(proxy_config.get("state_directory", default_state_dir))
+env_state_dir = os.environ.get("BW_PROXY_DATA")
+YAML_state_dir = proxy_config.get("state_directory")
+
+STATE_DIR = os.path.expanduser(env_state_dir or YAML_state_dir or default_state_dir)
 
 # Maximum operations per batch — configurable to minimize the race-condition window
 MAX_BATCH_SIZE: int = proxy_config.get("max_batch_size", 10)
@@ -123,3 +150,13 @@ MAX_AUDIT_SCAN_SIZE: int = _audit_config.get("max_scan_size", 100)
 
 # Hard physical ceiling for any scan to prevent memory/CLI exhaustion
 MAX_AUDIT_SCAN_CEILING: int = _audit_config.get("max_scan_ceiling", 1000)
+
+# -----------------
+# HITL CONSTANTS
+# -----------------
+_hitl_config = _config_cache.get("hitl", {})
+
+HITL_HOST: str = os.environ.get("HITL_HOST", _hitl_config.get("host", "127.0.0.1"))
+HITL_PORT = int(os.environ.get("HITL_PORT", 1138))
+HITL_AUTO_OPEN = os.environ.get("HITL_AUTO_OPEN", "true").lower() == "true"
+HITL_USE_HTTPS = os.environ.get("HITL_USE_HTTPS", "true").lower() == "true"

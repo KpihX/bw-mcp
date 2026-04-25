@@ -1,0 +1,24 @@
+proxy:
+  name: BW-Proxy
+  state_directory: ~/.bw/proxy
+  max_batch_size: 15
+redaction:
+  populated_tag: '[REDACTED_BY_PROXY_POPULATED]'
+  empty_tag: '[REDACTED_BY_PROXY_EMPTY]'
+security:
+  payload_tag: '[PAYLOAD]'
+  bw_password_env: BW_PASSWORD
+  bw_session_env: BW_SESSION
+wal_crypto:
+  salt_length: 16
+  key_length: 32
+  iterations: 480000
+audit:
+  match_tag: MATCH
+  mismatch_tag: MISMATCH
+  max_scan_size: 100
+  max_scan_ceiling: 1000
+hitl:
+  host: 127.0.0.1
+  port: 1138
+  auto_open: true

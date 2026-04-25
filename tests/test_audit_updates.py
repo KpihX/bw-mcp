@@ -1,20 +1,20 @@
 import pytest
 from unittest.mock import patch, MagicMock
-from bw_mcp.server import get_vault_map
-from bw_mcp.transaction import TransactionManager
-from bw_mcp.subprocess_wrapper import SecureSubprocessWrapper, SecureBWError
-from bw_mcp.models import (
+from bw_proxy.logic import get_vault_map
+from bw_proxy.transaction import TransactionManager
+from bw_proxy.subprocess_wrapper import SecureSubprocessWrapper, SecureBWError
+from bw_proxy.models import (
     MoveToCollectionAction, ItemAction, SecretFieldTarget,
     BatchComparePayload, CompareSecretRequest, CreateItemAction,
     CreateLoginPayload, CreateCardPayload, CreateIdentityPayload
 )
-from bw_mcp.server import compare_secrets_batch, _fetch_template
+from bw_proxy.logic import compare_secrets_batch, fetch_template
 import json
 import base64
 
-@patch('bw_mcp.server.SecureSubprocessWrapper.unlock_vault')
-@patch('bw_mcp.server.SecureSubprocessWrapper.execute_json')
-@patch('bw_mcp.server.HITLManager.ask_master_password')
+@patch('bw_proxy.logic.SecureSubprocessWrapper.unlock_vault')
+@patch('bw_proxy.logic.SecureSubprocessWrapper.execute_json')
+@patch('bw_proxy.logic.HITLManager.ask_master_password')
 def test_get_vault_map_dos_truncation(mock_ask, mock_exec_json, mock_unlock):
     """Verify that long search strings are truncated to 256 chars."""
     mock_ask.return_value = bytearray("pw", "utf-8")
@@ -57,8 +57,8 @@ def test_audit_compare_secrets_validation():
         )
     assert "Invalid field target" in str(exc.value)
 
-@patch('bw_mcp.transaction.SecureSubprocessWrapper.execute')
-@patch('bw_mcp.transaction.SecureSubprocessWrapper.execute_json')
+@patch('bw_proxy.transaction.SecureSubprocessWrapper.execute')
+@patch('bw_proxy.transaction.SecureSubprocessWrapper.execute_json')
 def test_move_to_collection_syntax(mock_exec_json, mock_exec):
     """Verify that MOVE_TO_COLLECTION uses the correct CLI syntax with encoded collections."""
     mock_exec_json.return_value = {"id": "item1", "name": "MoveMe"}
@@ -86,11 +86,11 @@ def test_move_to_collection_syntax(mock_exec_json, mock_exec):
     assert args[3] == expected_b64
     assert "Collections: ['col1', 'col2']" in msg
 
-@patch('bw_mcp.server.SecureSubprocessWrapper.unlock_vault')
-@patch('bw_mcp.server.SecureSubprocessWrapper.execute_json')
-@patch('bw_mcp.server.SecureSubprocessWrapper.audit_compare_secrets')
-@patch('bw_mcp.server.HITLManager.ask_master_password')
-@patch('bw_mcp.server.HITLManager.review_comparisons')
+@patch('bw_proxy.logic.SecureSubprocessWrapper.unlock_vault')
+@patch('bw_proxy.logic.SecureSubprocessWrapper.execute_json')
+@patch('bw_proxy.logic.SecureSubprocessWrapper.audit_compare_secrets')
+@patch('bw_proxy.logic.HITLManager.ask_master_password')
+@patch('bw_proxy.logic.HITLManager.review_comparisons')
 def test_compare_secrets_batch_tool(mock_review, mock_ask, mock_compare, mock_exec_json, mock_unlock):
     """Test the full tool flow for compare_secrets_batch."""
     mock_ask.return_value = bytearray("pw", "utf-8")
@@ -116,8 +116,8 @@ def test_compare_secrets_batch_tool(mock_review, mock_ask, mock_compare, mock_ex
     assert len(result["results"]) == 1
     assert "MATCH" in result["results"][0]["verdict"]
 
-@patch('bw_mcp.transaction.SecureSubprocessWrapper.execute')
-@patch('bw_mcp.transaction.SecureSubprocessWrapper.execute_json')
+@patch('bw_proxy.transaction.SecureSubprocessWrapper.execute')
+@patch('bw_proxy.transaction.SecureSubprocessWrapper.execute_json')
 def test_create_item_variants(mock_exec_json, mock_exec):
     """Test ItemAction.CREATE for Login, Card, and Identity types."""
     session_key = bytearray("fake", "utf-8")
@@ -146,20 +146,20 @@ def test_create_item_variants(mock_exec_json, mock_exec):
     item_pushed = json.loads(base64.b64decode(encoded_item).decode())
     assert item_pushed["login"]["username"] == "user1"
 
-@patch('bw_mcp.server.SecureSubprocessWrapper.unlock_vault')
-@patch('bw_mcp.server.SecureSubprocessWrapper.execute')
-@patch('bw_mcp.server.HITLManager.ask_master_password')
-def test_fetch_template_internal(mock_ask, mock_exec, mock_unlock):
-    """Test the internal _fetch_template function."""
+@patch('bw_proxy.logic.SecureSubprocessWrapper.unlock_vault')
+@patch('bw_proxy.logic.SecureSubprocessWrapper.execute')
+@patch('bw_proxy.logic.HITLManager.ask_master_password')
+def testfetch_template_internal(mock_ask, mock_exec, mock_unlock):
+    """Test the internal fetch_template function."""
     mock_ask.return_value = bytearray("pw", "utf-8")
     mock_unlock.return_value = bytearray("session", "utf-8")
     mock_exec.return_value = '{"template": "data"}'
     
-    res = _fetch_template("item")
+    res = fetch_template("item")
     assert "template" in res
     """Verify that UI destructive alert detects DELETE actions via Enum."""
-    from bw_mcp.ui import HITLManager
-    from bw_mcp.models import TransactionPayload, ItemAction, FolderAction, CreateFolderAction, DeleteItemAction
+    from bw_proxy.ui import HITLManager
+    from bw_proxy.models import TransactionPayload, ItemAction, FolderAction, CreateFolderAction, DeleteItemAction
     
     # 1. Non-destructive
     payload_safe = TransactionPayload(

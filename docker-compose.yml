@@ -1,0 +1,23 @@
+services:
+  bw-proxy:
+    build: .
+    container_name: bw-proxy
+    user: "${UID:-1000}:${GID:-1000}"
+    restart: unless-stopped
+    environment:
+      - BW_URL=${BW_URL:-https://vault.kpihx-labs.com}
+      - BW_EMAIL=${BW_EMAIL}
+      - BW_PROXY_DATA=/data
+      - BITWARDENCLI_APPDATA_DIR=/data/bw-cli
+      - HOME=/data
+      - HITL_HOST=0.0.0.0
+    volumes:
+      - bw-data:/data
+    ports:
+      - "1138:1138"
+    stdin_open: true
+    tty: true
+    command: ["serve"]
+
+volumes:
+  bw-data:

@@ -1,27 +1,27 @@
 # BW-MCP Operations Runbook 🛠️
 
-This document covers the lifecycle management of the `bw-mcp` server and the recovery flows for the Write-Ahead Log (WAL).
+This document covers the lifecycle management of the `bw-proxy` server and the recovery flows for the Write-Ahead Log (WAL).
 
 ## 🔋 Server Lifecycle
 
-The `bw-mcp` package includes a lifecycle controller to manage the background process.
+The `bw-proxy` package includes a lifecycle controller to manage the background process.
 
 ### Check Status
 Verify if the server is running and which PID it owns.
 ```bash
-bw-mcp status
+bw-proxy status
 ```
 
 ### Stop Server
 Gracefully terminate the server. This sends a `SIGTERM` to the process.
 ```bash
-bw-mcp stop
+bw-proxy stop
 ```
 
 ### Restart Server
 Forcefully restart the server (useful after updates).
 ```bash
-bw-mcp restart
+bw-proxy restart
 ```
 
 ---
@@ -44,10 +44,7 @@ Simply performing ANY read or write operation (e.g., `get_vault_map`) will trigg
 If automatic recovery fails or you want to see what's inside the WAL:
 ```bash
 # View the scrubbed content of the WAL
-bw-admin wal view
-
-# Force delete the WAL (WARNING: Vault might remain in inconsistent state)
-bw-admin wal delete
+bw-proxy admin wal view
 ```
 
 ---
@@ -60,4 +57,4 @@ If you are running in a headless environment (SSH without X-forwarding), Zenity 
 
 ### "Item not found" during rollback
 This happens if you modified an item via another Bitwarden client (Mobile, Web) during the short window of an MCP transaction.
-**Fix:** The WAL will be preserved. Use `bw-admin log view` to see the `failed_rollback` payload and manually fix the item in the Bitwarden Web Vault.
+**Fix:** The WAL will be preserved. Use `bw-proxy admin log view` to see the `failed_rollback` payload and manually fix the item in the Bitwarden Web Vault.

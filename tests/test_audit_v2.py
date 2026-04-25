@@ -1,16 +1,16 @@
 import pytest
 from unittest.mock import patch, MagicMock
-from bw_mcp.subprocess_wrapper import SecureSubprocessWrapper, SecureBWError
-from bw_mcp.server import find_item_duplicates, compare_secrets_batch
-from bw_mcp.models import FindDuplicatesPayload, BatchComparePayload, CompareSecretRequest
+from bw_proxy.subprocess_wrapper import SecureSubprocessWrapper, SecureBWError
+from bw_proxy.logic import find_item_duplicates, compare_secrets_batch
+from bw_proxy.models import FindDuplicatesPayload, BatchComparePayload, CompareSecretRequest
 import json
 import base64
 
-@patch('bw_mcp.server.SecureSubprocessWrapper.unlock_vault')
-@patch('bw_mcp.server.SecureSubprocessWrapper.execute_json')
-@patch('bw_mcp.server.SecureSubprocessWrapper.audit_bulk_compare')
-@patch('bw_mcp.server.HITLManager.ask_master_password')
-@patch('bw_mcp.server.HITLManager.review_duplicate_scan')
+@patch('bw_proxy.logic.SecureSubprocessWrapper.unlock_vault')
+@patch('bw_proxy.logic.SecureSubprocessWrapper.execute_json')
+@patch('bw_proxy.logic.SecureSubprocessWrapper.audit_bulk_compare')
+@patch('bw_proxy.logic.HITLManager.ask_master_password')
+@patch('bw_proxy.logic.HITLManager.review_duplicate_scan')
 def test_find_item_duplicates_tool(mock_review, mock_ask, mock_bulk, mock_exec_json, mock_unlock):
     """Test the find_item_duplicates tool flow."""
     mock_ask.return_value = bytearray("pw", "utf-8")
@@ -66,11 +66,11 @@ def test_audit_dynamic_field_resolution():
         )
     assert "Invalid field target namespace" in str(exc.value)
 
-@patch('bw_mcp.server.SecureSubprocessWrapper.unlock_vault')
-@patch('bw_mcp.server.SecureSubprocessWrapper.execute_json')
-@patch('bw_mcp.server.SecureSubprocessWrapper.audit_compare_secrets')
-@patch('bw_mcp.server.HITLManager.ask_master_password')
-@patch('bw_mcp.server.HITLManager.review_comparisons')
+@patch('bw_proxy.logic.SecureSubprocessWrapper.unlock_vault')
+@patch('bw_proxy.logic.SecureSubprocessWrapper.execute_json')
+@patch('bw_proxy.logic.SecureSubprocessWrapper.audit_compare_secrets')
+@patch('bw_proxy.logic.HITLManager.ask_master_password')
+@patch('bw_proxy.logic.HITLManager.review_comparisons')
 def test_compare_secrets_batch_v2(mock_review, mock_ask, mock_compare, mock_exec_json, mock_unlock):
     """Test that batch compare now accepts dynamic strings."""
     mock_ask.return_value = bytearray("pw", "utf-8")

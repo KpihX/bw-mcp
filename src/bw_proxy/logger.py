@@ -66,6 +66,10 @@ class TransactionLogger:
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(log_data, f, indent=2)
             
+        # Native Docker Logging: Print structured JSON to stdout
+        print(f"\n📝 [TRANSACTION LOG] {status.upper()}: {transaction_id}")
+        print(json.dumps(log_data, indent=2))
+        
         return filepath
 
     @staticmethod

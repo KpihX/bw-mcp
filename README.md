@@ -1,8 +1,8 @@
-# BW-MCP 🔐🤖
+# BW-Proxy 🔐🤖
 
 **Sovereign, Exhaustive, & Ultra-Secure Model Context Protocol (MCP) for Bitwarden**
 
-**BW-MCP** is a specialized, air-gapped intermediary designed to physically isolate Large Language Models (LLMs) from your Bitwarden cryptographic secrets, while still granting them 100% organizational superpowers over your vault.
+**BW-Proxy** is a specialized, air-gapped intermediary designed to physically isolate Large Language Models (LLMs) from your Bitwarden cryptographic secrets, while still granting them 100% organizational superpowers over your vault.
 
 It strongly enforces the **"AI-Blind Management"** philosophy. You can ask an AI (Claude, Cursor, Gemini) to completely reorganize your vault, rename poorly formatted accounts, manage your Enterprise Collections, update credit card expiration dates, or tag hundreds of items as favorites. *The AI will do all of this flawlessly, without ever being able to read or modify your Master Password, your TOTP seeds, your Credit Card CVVs, or your Social Security Number.*
 
@@ -34,17 +34,17 @@ We do not sell a dream. We document every architectural decision and **every lim
 If you are an AI agent or a new developer taking over this project, here is your roadmap:
 
 ### 1. The Core Engine (ACID & WAL)
-- **`src/bw_mcp/transaction.py`**: The Saga Pattern orchestrator. Manages the 3-phase commit (Simulate → Log → Execute → Rollback).
-- **`src/bw_mcp/wal.py`**: The Encrypted Write-Ahead Log implementation. Handles Fernet encryption and PBKDF2 key derivation.
-- **`src/bw_mcp/subprocess_wrapper.py`**: The raw interface to the `bw` CLI. Handles memory-safe password passing and RAM wiping.
+- **`src/bw_proxy/transaction.py`**: The Saga Pattern orchestrator. Manages the 3-phase commit (Simulate → Log → Execute → Rollback).
+- **`src/bw_proxy/wal.py`**: The Encrypted Write-Ahead Log implementation. Handles Fernet encryption and PBKDF2 key derivation.
+- **`src/bw_proxy/subprocess_wrapper.py`**: The raw interface to the `bw` CLI. Handles memory-safe password passing and RAM wiping.
 
 ### 2. The Data Layer (Sanitization)
-- **`src/bw_mcp/models.py`**: Pydantic models for every Bitwarden entity. This is where `force_redact()` lives—our primary defense against PII leakage.
-- **`src/bw_mcp/scrubber.py`**: Recursive payload scrubbing for logs and error messages.
+- **`src/bw_proxy/models.py`**: Pydantic models for every Bitwarden entity. This is where `force_redact()` lives—our primary defense against PII leakage.
+- **`src/bw_proxy/scrubber.py`**: Recursive payload scrubbing for logs and error messages.
 
 ### 3. The Server Interface
-- **`src/bw_mcp/server.py`**: FastMCP implementation. Defines the 5 tools and the server lifecycle.
-- **`src/bw_mcp/ui.py`**: Zenity-based Human-in-the-Loop dialogue system.
+- **`src/bw_proxy/server.py`**: FastMCP implementation. Defines the 5 tools and the server lifecycle.
+- **`src/bw_proxy/ui.py`**: Zenity-based Human-in-the-Loop dialogue system.
 
 ### 4. Quality & Testing
 - **`tests/`**: 81+ tests covering transactions, redaction, and crash recovery. Always run `make test` before suggesting a commit.
@@ -129,7 +129,7 @@ Here is exactly how an AI interacts with your vault.
                     PHASE 1: READING METADATA (AI-Blind)
 ================================================================================
 
- [ AI Agent ]                       [ BW-MCP ]               [ Bitwarden CLI ]
+ [ AI Agent ]                       [ BW-Proxy ]               [ Bitwarden CLI ]
       |                                     |                                |
       | -- 1. get_vault_map() ------------> |                                |
       |                                     | -- 2. Zenity UI Prompt ------> |
@@ -149,7 +149,7 @@ Here is exactly how an AI interacts with your vault.
                     PHASE 2: BATCH EXECUTION (Write)
 ================================================================================
 
- [ AI Agent ]                       [ BW-MCP ]               [ Bitwarden CLI ]
+ [ AI Agent ]                       [ BW-Proxy ]               [ Bitwarden CLI ]
       |                                     |                                |
       | -- 5. propose_vault_transaction --> |                                |
       |                                     |   (Enum Schema Validation)     |
@@ -178,6 +178,7 @@ Here is exactly how an AI interacts with your vault.
    - Immediately converts to a mutable `bytearray`.
    - After use, **overwrites every byte with `0x00`** via explicit loop (`for i in range(len(key)): key[i] = 0`).
    - This eliminates the main attack vector of memory dump forensics. **Deep Dive:** Read **[01_simulation_core_protocol.md](docs/01_simulation_core_protocol.md)**.
+   - **No persistence:** `BW_SESSION` is never saved by BW-Proxy. Every read, write, setup, and audit flow obtains a fresh session from the Master Password, uses it for the current operation, then wipes it.
 4. **Red Alerts on Destructive Actions:** Modifying an item logs a blue UI prompt. Deleting an item/folder triggers a native Red Warning Zenity Box to guarantee a human doesn't sleepwalk into approving an AI's destructive hallucination.
    - **Deep Dive:** Read **[05_simulation_destructive_firewall.md](docs/05_simulation_destructive_firewall.md)**.
 
@@ -291,7 +292,7 @@ The proxy was killed mid-transaction (power cut, `kill -9`). On the next MCP too
 
 ### 📦 The WAL File: Your Last Line of Defense
 
-During every transaction execution, the proxy writes an **AES-encrypted Write-Ahead Log** to `~/.bw/mcp/wal/pending_transaction.wal` **before** each CLI command is executed. The file is deleted once the batch completes (success or clean rollback). If it exists when the proxy starts, it's a crash signal.
+During every transaction execution, the proxy writes an **AES-encrypted Write-Ahead Log** to `~/.bw/proxy/wal/pending_transaction.wal` **before** each CLI command is executed. The file is deleted once the batch completes (success or clean rollback). If it exists when the proxy starts, it's a crash signal.
 
 #### 🔐 WAL Encryption Architecture
 
@@ -448,7 +449,7 @@ The Proxy exposes exactly **six** tools to the AI Agent. This limits the attack 
 *   **Absolute Agent-Blindness:** The AI operates exclusively on sanitized payloads (Pydantic `extra="ignore"` for reads, `extra="forbid"` for writes). Passwords, TOTPs, CVVs, and secure notes are mathematically scrubbed before reaching the context window.
 *   **Human-in-The-Loop Execution:** All write operations trigger a massive Zenity UI popup detailing the exact operations intent. The human must visually authorize the batch and enter the Master Password.
 *   **ACID Transaction Engine:** A full 3-phase Commit engine (Virtual Vault RAM Simulation $\rightarrow$ Disk Write-Ahead Log $\rightarrow$ LIFO Rollback) guarantees mathematical consistency. The vault is never left in an uncommitted state even upon network failure or `kill -9` process interruptions.
-*   **Auditing & CLI:** Every modification request is written to a human-readable, secret-stripped log in `logs/transactions/`. A dedicated Typer/Rich CLI (`bw-admin log view`) allows you to view the latest modifications beautifully in the terminal.
+*   **Auditing & CLI:** Every modification request is written to a human-readable, secret-stripped log. A dedicated Typer/Rich CLI (`bw-proxy admin log view`) allows you to view the latest modifications beautifully in the terminal.
 *   **Input (AI provides):**
     *   `rationale` (str): A direct message to the user explaining *why* the AI wants to do this.
     *   `operations` (List[VaultTransactionAction]): An array of polymorphic action objects.
@@ -507,7 +508,7 @@ Error: Invalid transaction payload. ValidationError: An internal error occurred.
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                       BW-MCP — ARCHITECTURE                                 │
+│                       BW-Proxy — ARCHITECTURE                                 │
 └─────────────────────────────────────────────────────────────────────────────┘
 
   ┌──────────────────────────┐
@@ -543,7 +544,7 @@ Error: Invalid transaction payload. ValidationError: An internal error occurred.
          ▼
   ┌──────────────────────────┐
   │  WAL Disk (Encrypted)    │  Fernet(AES-128) + PBKDF2(480k iter) + salt
-  │  ~/.bw/mcp/wal/  │  chmod 600 · idempotent pop on each step
+  │  ~/.bw/proxy/wal/│  chmod 600 · idempotent pop on each step
   └──────┬───────────────────┘
          │
          ▼
@@ -579,7 +580,7 @@ When a template is requested, the proxy forces a `bw get template ...`, intercep
 {
   "_metadata": {
     "source": "bw get template item.login",
-    "note": "Secret fields have been proactively redacted by BW-MCP to maintain AI-Blindness. Empty fields remain empty."
+    "note": "Secret fields have been proactively redacted by BW-Proxy to maintain AI-Blindness. Empty fields remain empty."
   },
   "template": {
     "passwordHistory": [],
@@ -642,7 +643,7 @@ For organizational perfection, the Proxy handles advanced states without ever to
 
 ## 🔒 Security Posture & ACID Compliance
 
-The core philosophy of **BW-MCP** is **Zero-Trust for the AI, Total-Reliability for the Human**. We achieve this by treating Bitwarden modifications as database transactions.
+The core philosophy of **BW-Proxy** is **Zero-Trust for the AI, Total-Reliability for the Human**. We achieve this by treating Bitwarden modifications as database transactions.
 
 ### 📜 What is ACID?
 We implement the four pillars of database reliability to protect your vault:
@@ -672,14 +673,14 @@ When logging Bitwarden CLI commands (in rollback traces and error messages), a *
 
 Following the developer mandate of **Independent Autonomous Packages**, the configuration is internalized within the package source.
 
-*   **Location:** `src/bw_mcp/config.yaml`
+*   **Location:** `src/bw_proxy/config.yaml`
 *   **Customization:** You can modify the `state_directory`, batch size, redaction tags, and cryptographic parameters.
 
 ```yaml
-# src/bw_mcp/config.yaml
+# src/bw_proxy/config.yaml
 proxy:
-  name: "BW-MCP"
-  state_directory: "~/.bw/mcp"
+  name: "BW-Proxy"
+  state_directory: "~/.bw/proxy"
   max_batch_size: 25
 
 redaction:
@@ -688,8 +689,8 @@ redaction:
 
 security:
   payload_tag: "[PAYLOAD]"        # Mask for opaque CLI payloads in logs/errors
-  bw_password_env: "BW_PASSWORD"  # Env var name for Master Password injection
-  bw_session_env: "BW_SESSION"    # Env var name for Session Key injection
+  bw_password_env: "BW_PASSWORD"  # Internal subprocess env var name for Master Password injection
+  bw_session_env: "BW_SESSION"    # Internal subprocess env var name for Session Key injection
 
 wal_crypto:
   salt_length: 16       # Random salt per WAL write (bytes)
@@ -699,10 +700,10 @@ wal_crypto:
 
 ## 📂 Transparency & File Structure
 
-The proxy maintains a centralized state directory (configurable) for auditing and recovery: `~/.bw/mcp/`
+The proxy maintains a centralized state directory (configurable) for auditing and recovery: `~/.bw/proxy/`
 
 ```text
-~/.bw/mcp/
+~/.bw/proxy/
 ├── logs/                  # Immutable Audit Trail (Scrubbed of secrets) — JSON format
 │   ├── 2026-02-28_10-00-01_<uuid>_success.json
 │   ├── 2026-02-28_10-15-45_<uuid>_rollback_success.json
@@ -738,7 +739,7 @@ Binary format: [16-byte salt][Fernet ciphertext (AES-128-CBC + HMAC-SHA256)]
 Permissions:   chmod 600 (owner-only read/write)
 Decryption:    Requires the same Master Password used during the transaction.
 ```
-To inspect a stranded WAL, use the CLI: `bw-admin wal view` (prompts for Master Password, displays scrubbed content).
+To inspect a stranded WAL, use the CLI: `bw-proxy admin wal view` (prompts for Master Password, displays scrubbed content).
 
 ---
 
@@ -746,63 +747,87 @@ To inspect a stranded WAL, use the CLI: `bw-admin wal view` (prompts for Master 
 
 Requires Python 3.12+ and `uv`.
 
-### 🛡️ Sovereign Hardened Installation (Recommended)
-This is the production standard for KpihX-compliant environments. The source code is installed into `/opt/bw-mcp` with `root:root` ownership, while data and configs are isolated in the user's home with strict permissions.
+### Classic CLI Installation
+This is the natural local-tool path. It installs the `bw-proxy` CLI in the user's uv tool environment and keeps code/data user-owned.
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/KpihX/bw-mcp.git
-cd bw-mcp
+git clone https://github.com/KpihX/bw-proxy.git
+cd bw-proxy
 
-# 2. Perform the sovereign install (requires sui/sudo for /opt/ and AppArmor)
-sui make install
+# 2. Install the CLI
+make install
+```
 
-# 3. Verify the installation security
+### 🛡️ Sovereign Hardened Installation
+This is the production standard for KpihX-compliant Linux environments. The source code is installed into `/opt/bw-proxy` with `root:root` ownership, while data and configs are isolated in the user's home with strict permissions.
+
+```bash
+# Requires the KπX sui privilege gateway for /opt/ and AppArmor
+sui -r "Install BW-Proxy as a root-owned hardened local tool" make install-hardened
+
+# Verify the installation security
 make audit
 ```
 
-### 🖥️ Native Auditing CLI (`bw-admin`)
+### 🖥️ Native Auditing CLI (`bw-proxy`)
 
 The proxy features an underlying auditor capturing every structural modification intent.
 
 ```bash
 # View a table of the 5 most recent transactions
-bw-admin log view -l 5
+bw-proxy admin log view -l 5
 
 # View the FULL JSON details of the most recent transaction (index 1)
-bw-admin log view -n 1
+bw-proxy admin log view -n 1
 
 # Delete old logs, keeping only the 10 most recent ones
-bw-admin log purge -k 10
+bw-proxy admin log purge -k 10
 
 # Inspect the full Write-Ahead Log state (Requires Master Password)
-bw-admin wal view
-
-# Delete the Write-Ahead Log to force-clear stranded transactions (Requires Master Password)
-bw-admin wal delete
+bw-proxy admin wal view
 
 # View full configuration
-bw-admin config get
+bw-proxy admin config get
 ```
 
-### ⚙️ Daemon Lifecycle CLI (`bw-mcp`)
+### 🐳 Docker Installation
+Docker is headless by default for portability. It does not receive `BW_PASSWORD` or `BW_SESSION` from `.env`; authentication always happens interactively through `bw-proxy admin setup` or a per-operation password prompt.
+
+```bash
+# Build and start the container-backed CLI wrapper
+make docker-install
+
+# Linux/X11 only: add native Zenity GUI approval support
+make docker-up-gui
+
+# Development mode with source bind-mounts
+make docker-dev
+
+# Development mode with Linux/X11 GUI support
+make docker-dev-gui
+```
+
+The default `docker-compose.yml` only mounts `~/.bw/proxy` as persistent state. `docker-compose.gui.yml` is an optional overlay for Linux desktop sessions; cross-platform GUI approval requires a different approval frontend, such as a local browser-based approval UI or a small host desktop companion.
+
+### ⚙️ Daemon Lifecycle CLI (`bw-proxy`)
 
 The main entrypoint acts as a lightweight daemon controller similar to `systemd` or `nginx`.
-When run by an AI client without arguments, it defaults to `bw-mcp serve` (stdio mode).
+When run by an AI client without arguments, it defaults to `bw-proxy serve` (stdio mode).
 
 ```bash
 # Check if the server is currently running (reads PID file)
-bw-mcp status
+bw-proxy status
 
 # Stop a running server cleanly via SIGTERM
-bw-mcp stop
+bw-proxy stop
 
-# Restart the server (Useful after 'sui make install' to load new bytecode)
+# Restart the server (Useful after 'make install' or 'make install-hardened' to load new bytecode)
 # The MCP client will automatically respawn it on the next query.
-bw-mcp restart
+bw-proxy restart
 
 # Print current version
-bw-mcp version
+bw-proxy version
 ```
 
 ### 🔌 Adding to an MCP Client
@@ -810,14 +835,14 @@ bw-mcp version
 To integrate this sovereign proxy into your favorite AI agent, use the following configurations.
 
 #### 1. Recommended (Global Installation)
-If you installed the proxy via `uv tool install bw-mcp`, the configuration is extremely simple:
+If you installed the proxy via `uv tool install bw-proxy`, the configuration is extremely simple:
 
 **Claude Desktop (`claude_desktop_config.json`):**
 ```json
 {
   "mcpServers": {
-    "bw-mcp": {
-      "command": "bw-mcp",
+    "bw-proxy": {
+      "command": "bw-proxy",
       "args": []
     }
   }
@@ -827,7 +852,7 @@ If you installed the proxy via `uv tool install bw-mcp`, the configuration is ex
 **Cursor / Other IDEs:**
 Register a new MCP server with:
 - **Type:** `command`
-- **Command:** `bw-mcp`
+- **Command:** `bw-proxy`
 
 #### 2. Local Development (Fallthrough)
 If you are running from the source code without global installation:
@@ -836,13 +861,13 @@ If you are running from the source code without global installation:
 ```json
 {
   "mcpServers": {
-    "bw-mcp": {
+    "bw-proxy": {
       "command": "uv",
       "args": [
         "--directory",
-        "/absolute/path/to/bw-mcp",
+        "/absolute/path/to/bw-proxy",
         "run",
-        "bw-mcp"
+        "bw-proxy"
       ]
     }
   }
@@ -851,24 +876,24 @@ If you are running from the source code without global installation:
 
 #### 3. Gemini CLI Extension Integration 🤖
 
-If you use the `gemini-cli`, you can integrate `bw-mcp` natively to give your agent Bitwarden superpowers.
+If you use the `gemini-cli`, you can integrate `bw-proxy` natively to give your agent Bitwarden superpowers.
 
 **Case A: Local Development / Cloned Repository**
 
-1. In the root of your `bw-mcp` clone, create a `gemini-extension.json`:
+1. In the root of your `bw-proxy` clone, create a `gemini-extension.json`:
 ```json
 {
-  "name": "bw-mcp",
+  "name": "bw-proxy",
   "version": "1.5.0",
   "description": "Sovereign IA-Blind Proxy for Bitwarden",
   "mcpServers": {
-    "bw-mcp": {
+    "bw-proxy": {
       "command": "uv",
       "args": [
         "--directory",
-        "/path/to/bw-mcp/",
+        "/path/to/bw-proxy/",
         "run",
-        "bw-mcp"
+        "bw-proxy"
       ]
     }
   },
@@ -885,15 +910,15 @@ gemini extensions install .
 **Case B: Installation via PyPI**
 
 1. Create a dedicated directory for the extension bridge (e.g., `~/bw-gemini`).
-2. Inside, create a `gemini-extension.json` pointing to your global `bw-mcp` executable:
+2. Inside, create a `gemini-extension.json` pointing to your global `bw-proxy` executable:
 ```json
 {
-  "name": "bw-mcp",
+  "name": "bw-proxy",
   "version": "1.5.0",
   "description": "Sovereign IA-Blind Proxy for Bitwarden",
   "mcpServers": {
-    "bw-mcp": {
-      "command": "/path/to/your/.local/bin/bw-mcp",
+    "bw-proxy": {
+      "command": "/path/to/your/.local/bin/bw-proxy",
       "args": []
     }
   },

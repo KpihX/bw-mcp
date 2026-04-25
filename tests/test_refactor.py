@@ -2,8 +2,8 @@ import pytest
 import base64
 import json
 from unittest.mock import patch, MagicMock
-from bw_mcp.transaction import TransactionManager
-from bw_mcp.models import EditAction, RefactorAction, RefactorScope
+from bw_proxy.transaction import TransactionManager
+from bw_proxy.models import EditAction, RefactorAction, RefactorScope
 
 def test_refactor_move_field():
     # Setup mock items
@@ -31,8 +31,8 @@ def test_refactor_move_field():
     
     session_key = bytearray(b"dummy-session")
     
-    with patch("bw_mcp.transaction.SecureSubprocessWrapper.get_item_raw") as mock_get, \
-         patch("bw_mcp.transaction.SecureSubprocessWrapper.execute") as mock_exec:
+    with patch("bw_proxy.transaction.SecureSubprocessWrapper.get_item_raw") as mock_get, \
+         patch("bw_proxy.transaction.SecureSubprocessWrapper.execute") as mock_exec:
         
         # Side effect for get_item_raw
         mock_get.side_effect = [source_item, dest_item]
@@ -71,8 +71,8 @@ def test_refactor_copy_login_user():
     
     session_key = bytearray(b"dummy-session")
     
-    with patch("bw_mcp.transaction.SecureSubprocessWrapper.get_item_raw") as mock_get, \
-         patch("bw_mcp.transaction.SecureSubprocessWrapper.execute") as mock_exec:
+    with patch("bw_proxy.transaction.SecureSubprocessWrapper.get_item_raw") as mock_get, \
+         patch("bw_proxy.transaction.SecureSubprocessWrapper.execute") as mock_exec:
         
         mock_get.side_effect = [source_item, dest_item]
         
@@ -105,8 +105,8 @@ def test_refactor_delete_note():
     
     session_key = bytearray(b"dummy-session")
     
-    with patch("bw_mcp.transaction.SecureSubprocessWrapper.get_item_raw") as mock_get, \
-         patch("bw_mcp.transaction.SecureSubprocessWrapper.execute") as mock_exec:
+    with patch("bw_proxy.transaction.SecureSubprocessWrapper.get_item_raw") as mock_get, \
+         patch("bw_proxy.transaction.SecureSubprocessWrapper.execute") as mock_exec:
         
         mock_get.return_value = source_item
         

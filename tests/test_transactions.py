@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
-from bw_mcp.models import TransactionPayload, BlindItem, ItemAction, FolderAction
-from bw_mcp.config import REDACTED_POPULATED, REDACTED_EMPTY
+from bw_proxy.models import TransactionPayload, BlindItem, ItemAction, FolderAction
+from bw_proxy.config import REDACTED_POPULATED, REDACTED_EMPTY
 
 def test_valid_polymorphic_payload():
     """Ensure standard operations parse perfectly using strings matching Enum values."""
@@ -222,7 +222,7 @@ def test_sanitization_custom_fields():
 
 def test_batch_too_large_rejected():
     """Ensure that a batch exceeding MAX_BATCH_SIZE is rejected with a clear error."""
-    from bw_mcp.config import MAX_BATCH_SIZE
+    from bw_proxy.config import MAX_BATCH_SIZE
     # Build a batch of MAX_BATCH_SIZE + 1 operations (all simple renames)
     operations = [
         {"action": "rename_item", "target_id": f"id-{i}", "new_name": f"Item {i}"}
@@ -239,7 +239,7 @@ def test_batch_too_large_rejected():
 
 def test_batch_at_limit_ok():
     """Ensure that a batch exactly at MAX_BATCH_SIZE passes validation."""
-    from bw_mcp.config import MAX_BATCH_SIZE
+    from bw_proxy.config import MAX_BATCH_SIZE
     # Build a batch of exactly MAX_BATCH_SIZE operations
     operations = [
         {"action": "rename_item", "target_id": f"id-{i}", "new_name": f"Item {i}"}
@@ -256,8 +256,8 @@ def test_batch_at_limit_ok():
 def test_resolve_action_names_hallucinated_folder():
     """Ensure that moving a folder by passing a folder ID to move_item raises SecureBWError before hitting the UI."""
     from unittest.mock import patch
-    from bw_mcp.transaction import TransactionManager
-    from bw_mcp.subprocess_wrapper import SecureBWError
+    from bw_proxy.transaction import TransactionManager
+    from bw_proxy.subprocess_wrapper import SecureBWError
     
     raw = {
         "rationale": "Hallucinated move",
@@ -267,7 +267,7 @@ def test_resolve_action_names_hallucinated_folder():
     }
     payload = TransactionPayload(**raw)
     
-    with patch("bw_mcp.transaction.SecureSubprocessWrapper.execute_json") as mock_execute:
+    with patch("bw_proxy.transaction.SecureSubprocessWrapper.execute_json") as mock_execute:
         def mock_execute_json(args, session_key):
             # The agent hallucinates and passes a folder ID to target_id (which expects an item)
             if args == ["get", "item", "fake-folder-id-123"]:

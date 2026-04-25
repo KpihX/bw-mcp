@@ -1,11 +1,11 @@
 import pytest
 import base64
-from bw_mcp.models import (
+from bw_proxy.models import (
     BlindItem, BlindLogin, BlindFolder, BlindOrganization,
     BlindCard, BlindField
 )
-from bw_mcp.config import REDACTED_POPULATED, REDACTED_EMPTY
-from bw_mcp.subprocess_wrapper import _sanitize_args_for_log
+from bw_proxy.config import REDACTED_POPULATED, REDACTED_EMPTY
+from bw_proxy.subprocess_wrapper import _sanitize_args_for_log
 
 
 # ====================================================================
