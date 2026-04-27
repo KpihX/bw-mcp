@@ -2,7 +2,19 @@
 
 All notable changes to this project, from its inception to the current secure state.
 
-## [v3.2.0] - 2026-04-27: Unlock Lease, Policy-Driven `do`, and WAL Session-Key Alignment
+## [v3.6.1] - 2026-04-27: Sovereign Appliance Standardization
+### 🏗️ Architecture & Deployment
+- **Agnostic System Appliance**: Transitioned to a root-owned system installation model using `/usr/local/bin` and `/etc/bw-proxy`.
+- **Stand-alone System Installers**: Introduced `install.sh` and `uninstall.sh` for one-click appliance deployment from GHCR.
+- **GitHub Actions Integration**: Added automated multi-arch (amd64/arm64) image publishing to GitHub Container Registry (GHCR).
+- **Makefile Hardening**: Cleaned up the Makefile, removing redundant no-op commands and hardening `docker-purge` to include host config removal.
+- **Git Hygiene**: Removed `.env` from tracking and updated `.gitignore`/`.dockerignore` for absolute secret isolation.
+
+### 🛡️ Core Logic & Verification
+- **Scoped Union Fetch Stability**: Fully validated the new vault discovery logic against a 142-test suite.
+- **Test Alignment**: Updated `test_server_filters.py` to match the current Scoped Union Fetch sequence (Orgs -> Colls -> Scoped items).
+
+## [v3.6.0] - 2026-04-27: Meticulous Test Suite & Schema Hardening
 ### 🔐 Auth & Docker Runtime
 - **Natural Bitwarden lifecycle enforced**: `admin login` now establishes the authenticated locked state only; `do` commands fail fast when Bitwarden is logged out instead of trying to log in implicitly.
 - **Docker unlock lease**: added `bw-proxy admin unlock` and `bw-proxy admin lock` for short-lived Docker-only session reuse. The lease is encrypted at rest in persistent Docker data and expires after the YAML-configured fixed duration.

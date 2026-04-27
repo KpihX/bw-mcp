@@ -27,3 +27,5 @@ scratch/__pycache__/
 
 # Accidental literal shell-variable paths / local state pollution
 *XDG_STATE_HOME*
+.env
+.env.bak

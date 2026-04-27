@@ -1,6 +1,6 @@
 [project]
 name = "bw-proxy"
-version = "3.5.3"
+version = "3.6.0"
 description = "A sovereign proxy acting as a security-hardened blind hub between LLMs and the Bitwarden CLI. Zero Trust · AI-Blind · ACID."
 readme = "README.md"
 authors = [

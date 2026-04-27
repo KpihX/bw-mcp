@@ -502,6 +502,7 @@ class TransactionManager:
             item_tpl["name"] = op.name
             item_tpl["folderId"] = op.folder_id
             item_tpl["organizationId"] = op.organization_id
+            item_tpl["collectionIds"] = op.collection_ids
             item_tpl["favorite"] = op.favorite
             # Use provided notes or ensure it's empty
             item_tpl["notes"] = op.notes if op.notes else None

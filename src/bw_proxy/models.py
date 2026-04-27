@@ -61,27 +61,6 @@ class RefactorScope(StrEnum):
     NOTE = "note"  # notes
 
 
-class BaseAction(BaseModel):
-    """Common base for all transaction actions."""
-    model_config = ConfigDict(extra="ignore")
-    action: str
-    rationale: Optional[str] = Field(None, description="Explanation for this specific operation.")
-
-
-class RefactorOperation(BaseAction):
-    """
-    Secure Refactor Operation.
-    Allows moving/copying secrets between items without exposing values to the AI.
-    """
-    action: Literal[EditAction.REFACTOR] = EditAction.REFACTOR
-    refactor_action: RefactorAction
-    source_item_id: str
-    scope: RefactorScope
-    key: str = Field(description="Field name or scope-specific key (e.g. 'password')")
-
-    dest_item_id: Optional[str] = None
-    dest_key: Optional[str] = None
-
 # SECURITY: Whitelist of allowed top-level namespaces for secret audit pathing.
 ALLOWED_NAMESPACES = ["login", "card", "identity", "fields", "notes", "secureNote"]
 
@@ -319,6 +298,7 @@ class CreateItemAction(BaseAction):
     login: Optional[CreateLoginPayload] = None
     card: Optional[CreateCardPayload] = None
     identity: Optional[CreateIdentityPayload] = None
+    collection_ids: Optional[List[str]] = None
 
 class RenameItemAction(BaseAction):
     action: Literal[ItemAction.RENAME] = ItemAction.RENAME
@@ -418,6 +398,21 @@ class UpsertCustomFieldAction(BaseAction):
     name: str
     value: str
     type: Literal[0, 2] = Field(default=0, description="0 for Text, 2 for Boolean. Hidden/Linked are forbidden.")
+
+
+class RefactorOperation(BaseAction):
+    """
+    Secure Refactor Operation.
+    Allows moving/copying secrets between items without exposing values to the AI.
+    """
+    action: Literal[EditAction.REFACTOR] = EditAction.REFACTOR
+    refactor_action: RefactorAction
+    source_item_id: str
+    scope: RefactorScope
+    key: str = Field(description="Field name or scope-specific key (e.g. 'password')")
+
+    dest_item_id: Optional[str] = None
+    dest_key: Optional[str] = None
 
 
 VaultTransactionAction = Annotated[

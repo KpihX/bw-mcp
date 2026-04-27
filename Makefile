@@ -28,10 +28,6 @@ link:  ## Install package in editable mode (user)
 unlink:  ## Uninstall tool
 	@$(UV) tool uninstall $(PKG_NAME)
 
-install: link ## Classic user-space CLI install
-
-uninstall: unlink ## Classic user-space CLI uninstall
-
 test: ## Run the full pytest suite
 	@$(PYTEST) -q
 
@@ -80,31 +76,18 @@ docker-link: ## Create an agnostic host-side wrapper (symlink) to execute comman
 
 docker-install: docker-build docker-volume docker-config docker-link ## Full Docker installation for the ephemeral runtime
 
-docker-up: docker-build docker-volume docker-config docker-link ## Prepare the Docker runtime (no long-lived MCP container)
-	@echo "✅ Docker runtime prepared. BW-Proxy now starts one ephemeral container per invocation."
-
-docker-dev: docker-build docker-volume docker-config docker-link ## Build the image and sync config for source-level Docker work
-	@echo "🛠️ Dev image ready. Use: docker compose -f docker-compose.yml -f docker-compose.dev.yml run --rm bw-proxy <args>"
-
-docker-down: ## No-op: the Docker runtime is ephemeral and leaves no daemon container behind
-	@echo "ℹ️ Nothing to stop. BW-Proxy Docker mode runs one-shot containers only."
-
 docker-uninstall: ## Remove Docker image and wrapper, keep persistent data
 	@echo "🗑️ Removing BW-Proxy Docker artifacts..."
 	@rm -f $(REAL_HOME)/.local/bin/$(PKG_NAME)
 	@docker rmi $(DOCKER_IMAGE) 2>/dev/null || true
 	@echo "✅ Docker uninstall complete (image and wrapper removed, data preserved)."
 
-docker-purge: docker-uninstall ## Destructive: remove Docker volume too
-	@echo "🔥 Purging Docker volume..."
+docker-purge: docker-uninstall ## Destructive: remove Docker volume and host config
+	@echo "🔥 Purging Docker volume and config..."
 	@docker volume rm $(DOCKER_VOLUME) 2>/dev/null || true
-	@echo "✅ Docker volume removed."
+	@rm -rf $(REAL_HOME)/.bw/proxy
+	@echo "✅ Docker volume and host config (~/.bw/proxy) removed."
 
-docker-logs: ## No-op: ephemeral runtime has no shared daemon log stream
-	@echo "ℹ️ No persistent container logs. Run commands via bw-proxy or docker compose run --rm."
-
-docker-logs-all: ## No-op: ephemeral runtime has no shared daemon log stream
-	@echo "ℹ️ No persistent container logs. Run commands via bw-proxy or docker compose run --rm."
 
 # ── Prod (Sovereign Root) ────────────────────────────────────────────────────
 
