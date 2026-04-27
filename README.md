@@ -74,18 +74,23 @@ To handle organizational vaults without metadata loss:
 
 ## 🕹️ Interface Modes
 
-### 1. MCP Mode (For AI Agents)
-Start the stdio server for Gemini, Claude, or Cursor.
-```bash
-bw-proxy mcp serve
-```
+### 1. CLI Mode (Recommended for Humans & AI Agents) 🚀
+The CLI is the most efficient and agnostic way to interact with the appliance. It uses RPC 2.0 (JSON), supports exact examples, and provides rich help documentation.
 
-### 2. CLI Mode (For Humans)
-Manage your appliance directly.
+**For AI Agents:** Using the CLI via `run_command` is more token-efficient than MCP and offers greater flexibility.
 ```bash
 bw-proxy admin status   # Health check
 bw-proxy admin unlock   # Create a 5-minute session lease
 bw-proxy do list-items  # Quick redacted scan
+```
+
+> [!TIP]
+> **AI Integration**: To enable full AI recognition of these commands, copy the `.agents/skills/bw-proxy` directory to your global `~/.agents/skills/` or into a project-specific `.agents/skills/` directory.
+
+### 2. MCP Mode (Standard Stdio)
+Start the stdio server for standard MCP clients like Gemini, Claude, or Cursor.
+```bash
+bw-proxy mcp serve
 ```
 
 ---
