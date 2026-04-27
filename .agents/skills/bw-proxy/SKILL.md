@@ -1,7 +1,7 @@
 ---
 name: bw-proxy
 description: Bitwarden MCP proxy — organizational vault control while keeping LLMs blind to secrets.
-version: 3.6.1
+version: 3.6.2
 ---
 
 # 🛡️ BW-Proxy Skill
