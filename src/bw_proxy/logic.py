@@ -118,16 +118,37 @@ def _matches_search(value: Optional[str], search: Optional[str]) -> bool:
 
 
 def _dedupe_by_id(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    deduped: List[Dict[str, Any]] = []
-    seen_ids: set[str] = set()
+    seen_ids = {}
     for row in rows:
         row_id = row.get("id")
-        if row_id:
-            if row_id in seen_ids:
-                continue
-            seen_ids.add(row_id)
-        deduped.append(row)
-    return deduped
+        if not row_id:
+            continue
+
+        if row_id not in seen_ids:
+            seen_ids[row_id] = row
+            continue
+
+        # Metadata-Aware Conflict Resolution:
+        # If we see the same ID twice, we prefer the version with richer metadata.
+        # This is critical because 'bw list items' (global) often omits organization
+        # and collection links that are only visible in scoped fetches.
+        old = seen_ids[row_id]
+        old_org = old.get("organizationId")
+        new_org = row.get("organizationId")
+
+        # Preference 1: Has Organization ID
+        if new_org and not old_org:
+            seen_ids[row_id] = row
+        elif not new_org and old_org:
+            pass  # Keep old version
+        else:
+            # Preference 2: Has more Collections (or equal, in which case later one wins)
+            old_cols = len(old.get("collectionIds") or [])
+            new_cols = len(row.get("collectionIds") or [])
+            if new_cols >= old_cols:
+                seen_ids[row_id] = row
+
+    return list(seen_ids.values())
 
 
 def _filter_raw_items(
@@ -629,8 +650,50 @@ def get_vault_map(
         raw_folders: List[Dict[str, Any]] = []
         raw_trash_folders: List[Dict[str, Any]] = []
 
+        # --- Discovery Phase ---
+        # We fetch Organizations and Collections first because they provide the Scopes
+        # needed for deep item discovery.
+        if include_orgs:
+            try:
+                raw_orgs = SecureSubprocessWrapper.execute_json(["list", "organizations"], session_key)
+                if organization_id:
+                    raw_orgs = [o for o in raw_orgs if o.get("id") == organization_id]
+                organizations = [BlindOrganization(**deepcopy(o)).model_dump(exclude_unset=True) for o in raw_orgs]
+
+                cols_args = ["list", "collections"]
+                if organization_id:
+                    cols_args.extend(["--organizationid", organization_id])
+                raw_cols = SecureSubprocessWrapper.execute_json(cols_args, session_key)
+                if organization_id:
+                    raw_cols = [c for c in raw_cols if c.get("organizationId") == organization_id]
+                if collection_id:
+                    raw_cols = [c for c in raw_cols if c.get("id") == collection_id]
+                collections = [BlindOrganizationCollection(**deepcopy(c)).model_dump(exclude_unset=True) for c in raw_cols]
+            except Exception:
+                # Organizations are optional; if fetch fails, we continue with personal vault only
+                organizations = []
+                collections = []
+
+        # --- Item Fetch Phase (Scoped Union) ---
         if trash_state in ["none", "all"] and fetch_items:
+            # 1. Global Fetch (Personal + Shared-to-Me)
+            # Note: Global fetch often lacks organizationId/collectionIds metadata in some CLI versions.
             raw_items = SecureSubprocessWrapper.execute_json(items_base_args, session_key)
+
+            # 2. Scoped Fetch (Org-by-Org Enrichment)
+            # If we detected organizations and the user isn't already filtering by a specific org,
+            # we perform iterative fetches to ensure we get the full metadata (collectionIds).
+            if include_orgs and not organization_id and organizations:
+                for org in organizations:
+                    org_id = org.get("id")
+                    if not org_id: continue
+                    try:
+                        org_raw = SecureSubprocessWrapper.execute_json(["list", "items", "--organizationid", org_id], session_key)
+                        raw_items.extend(org_raw)
+                    except Exception:
+                        pass # Partial failures in org fetch are non-fatal
+
+            # 3. Filter & Deduplicate (Metadata-Aware Merge happens inside _filter_raw_items -> _dedupe_by_id)
             raw_items = _filter_raw_items(
                 raw_items,
                 search_items=search_items,
@@ -646,6 +709,18 @@ def get_vault_map(
         if trash_state in ["only", "all"] and fetch_items:
             trash_items_args = items_base_args + ["--trash"]
             raw_trash_items = SecureSubprocessWrapper.execute_json(trash_items_args, session_key)
+
+            # Repeat Scoped Discovery for Trash
+            if include_orgs and not organization_id and organizations:
+                for org in organizations:
+                    org_id = org.get("id")
+                    if not org_id: continue
+                    try:
+                        org_trash = SecureSubprocessWrapper.execute_json(["list", "items", "--organizationid", org_id, "--trash"], session_key)
+                        raw_trash_items.extend(org_trash)
+                    except Exception:
+                        pass
+
             raw_trash_items = _filter_raw_items(
                 raw_trash_items,
                 search_items=search_items,
@@ -667,27 +742,6 @@ def get_vault_map(
         trash_items = [BlindItem(**deepcopy(i)).model_dump(exclude_unset=True) for i in raw_trash_items]
         trash_folders = [BlindFolder(**deepcopy(f)).model_dump(exclude_unset=True) for f in raw_trash_folders]
 
-        if include_orgs:
-            try:
-                raw_orgs = SecureSubprocessWrapper.execute_json(["list", "organizations"], session_key)
-                if organization_id:
-                    raw_orgs = [o for o in raw_orgs if o.get("id") == organization_id]
-                organizations = [BlindOrganization(**deepcopy(o)).model_dump(exclude_unset=True) for o in raw_orgs]
-
-                cols_args = ["list", "collections"]
-                if organization_id:
-                    cols_args.extend(["--organizationid", organization_id])
-                
-                raw_cols = SecureSubprocessWrapper.execute_json(cols_args, session_key)
-                if organization_id:
-                    raw_cols = [c for c in raw_cols if c.get("organizationId") == organization_id]
-                if collection_id:
-                    raw_cols = [c for c in raw_cols if c.get("id") == collection_id]
-                collections = [BlindOrganizationCollection(**deepcopy(c)).model_dump(exclude_unset=True) for c in raw_cols]
-            except Exception:
-                organizations = []
-                collections = []
-        
         result = {
             "status": "success",
             "message": "Vault map successfully retrieved. Sensitive fields are redacted.",
