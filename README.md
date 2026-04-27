@@ -1,87 +1,100 @@
 # 🔐 BW-Proxy — Sovereign Bitwarden Appliance
 
 > **Zero Trust · AI-Blind · ACID Durable**  
-> A high-security proxy for Bitwarden organization vaults, designed to keep LLMs and AI agents blind to your real secrets while giving them full refactoring and auditing capabilities.
+> The authoritative appliance for Bitwarden organization vault control. Keep AI agents and LLMs blind to your real secrets while giving them full auditing and refactoring powers.
 
 ---
 
-## 🏛️ Philosophy: The Sovereign Hub
+## 🏛️ Project Architecture (Sovereign Tree)
 
-BW-Proxy is not just a tool; it's a **Sovereign Appliance**. It creates a secure, air-gapped environment (via Docker) where your Bitwarden vault can be manipulated by AI without the AI ever seeing a plain-text password or a master key.
-
-- **0 Trust**: Secrets never leave the proxy's memory-wiped runtime.
-- **100% Control**: Every transaction requires explicit Human-In-The-Loop (HITL) approval via a premium web interface.
-- **ACID Integrity**: Uses a Write-Ahead Log (WAL) to ensure your vault never ends up in a corrupted state during complex refactors.
+```ascii
+BW-PROXY PROJECT
+├── 📂 src/bw_proxy/     ◄── Core Engine (ACID Transaction, WAL, Redaction)
+├── 📂 scripts/          ◄── Host-side Shims (Dynamic porting, Browser HITL)
+├── 📂 docs/             ◄── Deep-dive Hardening & Operator Guides
+├── 📄 install.sh        ◄── System-wide Appliance Installer (Root-owned)
+├── 📄 Makefile          ◄── Developer & Release Automator
+└── 📄 Dockerfile        ◄── Multi-stage Hardened Runtime
+```
 
 ---
 
-## 🚀 Installation
+## 🚀 Installation Modes
 
-### 1. Appliance Mode (Recommended)
-Install the pre-built, security-hardened image directly from the GitHub Container Registry (GHCR).
+### A. Appliance Mode (Standard Pro)
+Ideal for production use. Installs a root-owned binary and uses the official image.
 
+**Via curl (Zero-Clone):**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/KpihX/bw-proxy/main/install.sh | sudo bash
 ```
 
-### 2. Developer Mode (Source)
-Clone the repository and build it locally using `uv`.
+**What it does internally:**
+1.  **Image**: Pulls `ghcr.io/kpihx/bw-proxy:latest`.
+2.  **Binary**: Creates `/usr/local/bin/bw-proxy` (owned by root).
+3.  **Config**: Creates `/etc/bw-proxy/`.
+4.  **Data**: Creates a persistent Docker volume `bw_mcp_bw-data`.
+
+---
+
+### B. Developer Mode (Source Clone)
+Ideal for contribution or source-level auditing.
 
 ```bash
 git clone https://github.com/KpihX/bw-proxy.git
 cd bw-proxy
-make docker-install
+make docker-install  # Requires SUDO for builds
 ```
 
 ---
 
-## 🛠️ Usage
+## ⚙️ Core Mechanisms (The Magic)
 
-Once installed, use the `bw-proxy` command anywhere.
+### 1. The HITL Browser Flux
+When an AI agent requests a vault change, the proxy intercepts the execution:
+1.  **Port Allocation**: The host shim finds a free random port.
+2.  **Container Launch**: The appliance starts, mapping the internal HITL server to that port.
+3.  **URL Interception**: The shim detects the Approval URL in stdout and **automatically opens your browser**.
+4.  **Human Approval**: You review the rationale and the diff, then approve with your Master Password.
 
-### Administrative Control
+### 2. The 3-Phase ACID Commit (WAL)
+Every mutation is transactional.
+- **Simulation**: Actions are validated in RAM first.
+- **WAL**: Actions are encrypted and logged to disk *before* execution.
+- **Commit**: Actions are sent to the Bitwarden CLI.
+- **Rollback**: If a crash occurs, the proxy performs a LIFO rollback on the next start.
+
+### 3. Scoped Union Fetch
+To handle organizational vaults without metadata loss:
+- The proxy discovers all accessible **Organizations** and **Collections** first.
+- It then performs scoped queries (`--organizationid`) to fetch "rich" items with full metadata.
+- It merges results with the global vault list, ensuring organizational assignments are preserved.
+
+---
+
+## 🕹️ Interface Modes
+
+### 1. MCP Mode (For AI Agents)
+Start the stdio server for Gemini, Claude, or Cursor.
 ```bash
-bw-proxy admin login    # Authenticate (one-time setup)
-bw-proxy admin unlock   # Create a secure session lease
-bw-proxy admin status   # Check the health of the appliance
+bw-proxy mcp serve
 ```
 
-### Vault Operations (`do`)
-The AI agent uses these tools to manage your vault blindly.
+### 2. CLI Mode (For Humans)
+Manage your appliance directly.
 ```bash
-bw-proxy do get-vault-map         # Scan the vault (redacted output)
-bw-proxy do find-duplicates       # Audit for secret collisions
-bw-proxy do refactor-secrets      # Move secrets blindly between items
-bw-proxy do propose               # Batch several operations with rationale
+bw-proxy admin status   # Health check
+bw-proxy admin unlock   # Create a 5-minute session lease
+bw-proxy do list-items  # Quick redacted scan
 ```
 
 ---
 
-## 🛡️ Security Machinery
+## 🛠️ Maintenance & Release
 
-- **Docker-Only Lease**: The master password is used to generate a temporary, encrypted session key stored only within the persistent Docker volume.
-- **Persistent Machine ID**: Stabilizes Bitwarden's device identity to prevent repeated "New Device" emails and decryption failures.
-- **Root-Owned Proxy**: The `install.sh` script places the binary in `/usr/local/bin` (root-owned), preventing non-privileged malware from tampering with the proxy logic.
-- **Memory Wiping**: All cryptographic keys are held in `bytearray` buffers and explicitly zeroed out after each use.
-
----
-
-## 🏗️ Architecture
-
-```ascii
-      AI AGENT
-         │
-         ▼
-    ┌──────────┐      HITL APPROVAL
-    │ BW-PROXY │ ◄─── (Browser UI)
-    └────┬─────┘
-         │
-         ▼ (Encrypted WAL)
-    ┌──────────┐
-    │  BIT-    │
-    │  WARDEN  │
-    └──────────┘
-```
+- **Update**: `curl ... | sudo bash` (re-runs the installer).
+- **Uninstall**: `sudo ./uninstall.sh`.
+- **Release (Dev)**: `make release` (automatic tagging and GHCR propulsion).
 
 ---
 

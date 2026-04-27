@@ -15,10 +15,18 @@ APPARMOR_TARGET := /etc/apparmor.d/opt.bw-proxy.bin.bw-proxy
 DOCKER_IMAGE := $(PKG_NAME):latest
 DOCKER_VOLUME := bw_mcp_bw-data
 DOCKER_ENV_PATH := $(REAL_HOME)/.bw/proxy/docker.env
+VERSION := $(shell grep -m 1 version pyproject.toml | tr -s ' ' | tr -d '"' | tr -d "'" | cut -d' ' -f3)
 
 help:  ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | \
-	  awk 'BEGIN {FS = ":.*?## "}; {printf "  %-15s %s\n", $$1, $$2}'
+	sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
+release: ## Create and push a new git tag based on pyproject.toml version
+	@echo "🚀 Releasing version v$(VERSION)..."
+	@git tag -a v$(VERSION) -m "Release v$(VERSION)"
+	@git push origin master
+	@git push origin v$(VERSION)
+	@echo "✅ Tag v$(VERSION) pushed. GitHub Action will now build the GHCR image."
 
 # ── Dev ──────────────────────────────────────────────────────────────────────
 
