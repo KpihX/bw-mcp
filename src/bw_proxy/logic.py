@@ -33,7 +33,6 @@ from .vault_runtime import (
     build_execution_context,
     ensure_fresh_sync,
     ensure_target_server,
-    finalize_execution_context,
     get_command_policy,
     load_bw_status,
     relock_vault,
@@ -42,7 +41,6 @@ from .vault_runtime import (
     supports_unlock_lease,
     validate_authenticated_context,
 )
-vault_operation = requires_authenticated_vault  # Alias for tests
 from .web_ui import WebEditorManager
 from .wal import WAL_FILE
 
@@ -242,6 +240,33 @@ def _open_authenticated_vault(title: str) -> tuple[Optional[bytearray], Optional
         raise SecureProxyError("Authentication cancelled. Master Password is required to unlock the authenticated vault.")
     session_key = SecureSubprocessWrapper.unlock_vault(master_password)
     return master_password, session_key
+
+
+def vault_operation(title: str):
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            master_password = None
+            session_key = None
+            try:
+                master_password, session_key = _open_authenticated_vault(title)
+                SecureSubprocessWrapper.execute(["sync"], session_key)
+                return func(*args, session_key=session_key, master_password=master_password, **kwargs)
+            except Exception as exc:
+                return _error(_safe_error_message(exc))
+            finally:
+                try:
+                    if session_key is not None:
+                        _relock_vault()
+                except Exception:
+                    pass
+                if session_key is not None:
+                    for i in range(len(session_key)):
+                        session_key[i] = 0
+                if master_password is not None:
+                    for i in range(len(master_password)):
+                        master_password[i] = 0
+        return wrapper
+    return decorator
 
 def login(email: str, url: str) -> Dict[str, Any]:
     """
@@ -452,6 +477,9 @@ def sync(session_key: Optional[bytearray] = None, **kwargs) -> Dict[str, Any]:
       bw-proxy do sync
     """
     try:
+        recovery_msg = _maybe_run_recovery(session_key)
+        if recovery_msg:
+            return recovery_msg
         res = SecureSubprocessWrapper.execute(["sync"], session_key)
         return _success(res)
     except Exception as e:
@@ -565,6 +593,10 @@ def get_vault_map(
         search_items = _normalize_search_term(search_items)
         search_folders = _normalize_search_term(search_folders)
 
+        recovery_msg = _maybe_run_recovery(session_key)
+        if recovery_msg:
+            return recovery_msg
+
         has_item_filters = any([search_items, folder_id, collection_id, organization_id])
         has_folder_filters = bool(search_folders)
         fetch_items = not has_folder_filters or has_item_filters
@@ -673,7 +705,7 @@ def get_vault_map(
     except Exception as e:
         return _error(f"Proxy Internal Error during serialization: {_safe_error_message(e)}")
 
-@requires_authenticated_vault("Vault Transaction Proposal", unlock_deferred=True)
+@requires_authenticated_vault("Execute Vault Transaction", unlock_deferred=True)
 @supports_unlock_lease
 @requires_fresh_sync
 def propose_vault_transaction(
@@ -793,7 +825,7 @@ def inspect_transaction_log(tx_id: str = None, n: int = None) -> Dict[str, Any]:
     except Exception as e:
         return _error(f"Unexpected Error reading log: {_safe_error_message(e)}")
 
-@requires_authenticated_vault("Blind Secret Comparison Audit", unlock_deferred=True)
+@requires_authenticated_vault("Blind Secret Audit", unlock_deferred=True)
 @supports_unlock_lease
 @requires_fresh_sync
 @autosave_large_result
@@ -922,6 +954,10 @@ def fetch_template(
         return _error(f"Invalid template type '{template_type}'. Must be one of: {', '.join(valid_types)}")
 
     try:
+        recovery_msg = _maybe_run_recovery(session_key)
+        if recovery_msg:
+            return recovery_msg
+
         template_data = SecureSubprocessWrapper.execute_json(["get", "template", valid_type.value], session_key)
         safe_data = deep_scrub_payload(template_data)
         
@@ -1286,4 +1322,5 @@ def refactor_item_secrets(
             operation_type="refactor",
         )
     except Exception as e:
+        return _error(f"Proxy Error processing refactor: {_safe_error_message(e)}", operation_type="refactor")
         return _error(f"Proxy Error processing refactor: {_safe_error_message(e)}", operation_type="refactor")

@@ -2,6 +2,7 @@ import importlib.util
 import threading
 from pathlib import Path
 from unittest.mock import MagicMock
+import pytest
 
 
 _SHIM_PATH = Path(__file__).resolve().parents[1] / "scripts" / "bw_proxy_shim.py"
@@ -9,6 +10,12 @@ _SPEC = importlib.util.spec_from_file_location("bw_proxy_shim", _SHIM_PATH)
 bw_proxy_shim = importlib.util.module_from_spec(_SPEC)
 assert _SPEC.loader is not None
 _SPEC.loader.exec_module(bw_proxy_shim)
+
+
+@pytest.fixture(autouse=True)
+def mock_runtime_inactive(monkeypatch):
+    monkeypatch.setattr(bw_proxy_shim, "_is_runtime_active", lambda name: False)
+    monkeypatch.setattr(bw_proxy_shim, "_ensure_runtime_active", lambda name, port: None)
 
 
 def test_default_args_falls_back_to_serve(monkeypatch):

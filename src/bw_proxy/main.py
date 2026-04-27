@@ -141,6 +141,39 @@ def mcp_serve() -> None:
         clear_pid()
 
 
+@mcp_app.command("daemon")
+def mcp_daemon() -> None:
+    """Start a background keep-alive loop for the Docker runtime."""
+    import time
+    from .unlock_lease import UnlockLeaseManager
+
+    lease_mgr = UnlockLeaseManager()
+    console.print("🚀 [Daemon] Runtime keep-alive started.")
+    
+    # Initial grace period to allow 'admin unlock' to be called
+    grace_period_end = time.time() + 300 
+    
+    try:
+        while True:
+            lease = lease_mgr.get_lease()
+            if not lease:
+                if time.time() > grace_period_end:
+                    console.print("ℹ️ [Daemon] No active lease after grace period. Exiting.")
+                    break
+            elif lease_mgr.is_expired(lease):
+                console.print("ℹ️ [Daemon] Lease expired. Exiting.")
+                break
+            else:
+                # Reset grace period if we have a valid lease
+                grace_period_end = time.time() + 60
+                
+            time.sleep(5)
+    except KeyboardInterrupt:
+        console.print("ℹ️ [Daemon] Interrupted.")
+    finally:
+        console.print("🏁 [Daemon] Runtime keep-alive stopped.")
+
+
 @mcp_app.command("status")
 def mcp_status() -> None:
     """Check whether the MCP server process is currently running."""
@@ -515,6 +548,7 @@ def do_examples_cmd():
 
 def _register_manual_commands() -> None:
     register_command(CommandSpec(group="mcp", name="serve", summary="Start the BW-Proxy server in stdio MCP mode (blocks until killed).", body="Starts the local stdio MCP runtime and writes a PID file for lifecycle control.", examples=["bw-proxy mcp serve"], supports_output_file=False))
+    register_command(CommandSpec(group="mcp", name="daemon", summary="Start a background keep-alive loop for the Docker runtime.", body="Maintains a stable machine identity for the Bitwarden CLI across ephemeral invocations. Exits when the vault lease expires.", examples=["bw-proxy mcp daemon"], supports_output_file=False))
     register_command(CommandSpec(group="mcp", name="status", summary="Check whether the MCP server process is currently running.", body="Reads the PID file and reports whether the local MCP process is alive, stale, or absent.", examples=["bw-proxy mcp status"], supports_output_file=False))
     register_command(CommandSpec(group="mcp", name="stop", summary="Send SIGTERM to the running server via the PID file.", body="Gracefully terminates the local MCP process when a live PID is registered.", examples=["bw-proxy mcp stop"], supports_output_file=False))
     register_command(CommandSpec(group="mcp", name="restart", summary="Stop the running server (MCP clients will auto-respawn it).", body="Stops the local MCP process so the MCP host can respawn a fresh runtime on the next tool call.", examples=["bw-proxy mcp restart"], supports_output_file=False))

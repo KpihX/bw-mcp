@@ -1,4 +1,4 @@
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from types import SimpleNamespace
 
 from bw_proxy import logic
@@ -95,20 +95,14 @@ def test_logout_is_idempotent_when_already_unauthenticated():
 def test_vault_operation_relocks_after_success():
     wrapped = logic.vault_operation("Auth")(lambda **kwargs: {"status": "success", "message": "ok"})
 
-    with patch("bw_proxy.vault_runtime.build_execution_context") as mock_build, \
-         patch("bw_proxy.vault_runtime.finalize_execution_context") as mock_finalize:
-        
-        mock_ctx = MagicMock()
-        mock_ctx.session_key = bytearray(b"session")
-        mock_ctx.master_password = bytearray(b"pw")
-        mock_ctx.unlock_deferred = False
-        mock_build.return_value = mock_ctx
-        mock_finalize.return_value = None
-        
+    with patch("bw_proxy.logic._open_authenticated_vault", return_value=(bytearray(b"pw"), bytearray(b"session"))), patch(
+        "bw_proxy.logic.SecureSubprocessWrapper.execute"
+    ) as mock_execute, patch("bw_proxy.logic._relock_vault") as mock_relock:
         result = wrapped()
-    
+
     assert result["status"] == "success"
-    mock_finalize.assert_called_once_with(mock_ctx)
+    mock_execute.assert_called_once()
+    mock_relock.assert_called_once()
 
 
 @patch("bw_proxy.logic._relock_vault")

@@ -89,7 +89,7 @@ class UnlockLeaseManager:
             return {"state": "corrupt", "docker_only": True}
         if lease is None:
             return {"state": "absent", "docker_only": True}
-        state = "valid" if lease.expires_at > _now() else "expired"
+        state = "active" if lease.expires_at > _now() else "expired"
         return {
             "state": state,
             "docker_only": True,
@@ -118,5 +118,14 @@ class UnlockLeaseManager:
 
         if require_valid and lease.expires_at <= _now():
             UnlockLeaseManager.clear()
-            return None
         return lease
+
+    @staticmethod
+    def get_lease() -> Optional[UnlockLease]:
+        """Convenience method for background daemon."""
+        return UnlockLeaseManager.load(require_valid=False)
+
+    @staticmethod
+    def is_expired(lease: UnlockLease) -> bool:
+        """Check if a loaded lease is expired."""
+        return lease.expires_at <= _now()

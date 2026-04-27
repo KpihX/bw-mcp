@@ -20,16 +20,17 @@ TEST_PAYLOAD = {
     ]
 }
 
-@patch('bw_proxy.transaction.WALManager.has_pending_transaction', return_value=False)
-@patch('bw_proxy.transaction.HITLManager.authorize_transaction')
+@patch('bw_proxy.transaction.HITLManager.review_transaction')
+@patch('bw_proxy.transaction.HITLManager.ask_master_password')
 @patch('bw_proxy.transaction.SecureSubprocessWrapper.unlock_vault')
 @patch('bw_proxy.transaction.SecureSubprocessWrapper.execute')
 @patch('bw_proxy.transaction.SecureSubprocessWrapper.execute_json')
-def test_full_transaction_batch_execution(mock_exec_json, mock_exec, mock_unlock, mock_auth, mock_wal):
+def test_full_transaction_batch_execution(mock_exec_json, mock_exec, mock_unlock, mock_ask_pw, mock_review):
     """Mocks all HITL and Subprocess dependencies to rigorously test the Transaction routing engine."""
     
     # Setup mocks
-    mock_auth.return_value = {"approved": True, "password": bytearray("fake_master_password", "utf-8")}
+    mock_review.return_value = True
+    mock_ask_pw.return_value = bytearray("fake_master_password", "utf-8")
     mock_unlock.return_value = bytearray("fake_session_key_12345", "utf-8")
     
     # Define a smart mock function to handle both UI name resolution and execution phases
@@ -51,30 +52,34 @@ def test_full_transaction_batch_execution(mock_exec_json, mock_exec, mock_unlock
     
     # Assertions
     assert "Transaction completed successfully" in result
-    assert mock_auth.call_count == 1
+    assert mock_review.call_count == 1
+    assert mock_ask_pw.call_count == 1
+    assert mock_unlock.call_count == 1
     
     # 1 explicit preflight sync + 7 operations
     assert mock_exec.call_count == 8
 
-@patch('bw_proxy.transaction.WALManager.has_pending_transaction', return_value=False)
-@patch('bw_proxy.transaction.HITLManager.authorize_transaction')
+@patch('bw_proxy.transaction.HITLManager.review_transaction')
+@patch('bw_proxy.transaction.HITLManager.ask_master_password')
 @patch('bw_proxy.transaction.SecureSubprocessWrapper.unlock_vault')
 @patch('bw_proxy.transaction.SecureSubprocessWrapper.execute_json')
-def test_transaction_aborted_by_user(mock_exec_json, mock_unlock, mock_auth, mock_wal):
+def test_transaction_aborted_by_user(mock_exec_json, mock_unlock, mock_ask, mock_review):
     """Test what happens when a user clicks 'No' or closes the Zenity popup."""
-    mock_auth.return_value = {"approved": False}
+    mock_review.return_value = False
+    mock_ask.return_value = bytearray("pw", "utf-8")
     mock_unlock.return_value = bytearray("session", "utf-8")
     mock_exec_json.return_value = {"name": "ResolvedName"}
     
     result = TransactionManager.execute_batch(TEST_PAYLOAD)
     assert result == "Transaction aborted by the user."
 
-@patch('bw_proxy.transaction.WALManager.has_pending_transaction', return_value=False)
-@patch('bw_proxy.transaction.HITLManager.authorize_transaction')
+@patch('bw_proxy.transaction.HITLManager.review_transaction')
+@patch('bw_proxy.transaction.HITLManager.ask_master_password')
 @patch('bw_proxy.transaction.SecureSubprocessWrapper.unlock_vault')
-def test_transaction_unlock_failure(mock_unlock, mock_auth, mock_wal):
+def test_transaction_unlock_failure(mock_unlock, mock_ask, mock_review):
     """Test what happens when the user types the wrong master password."""
-    mock_auth.return_value = {"approved": True, "password": bytearray("wrong_password", "utf-8")}
+    mock_review.return_value = True
+    mock_ask.return_value = bytearray("wrong_password", "utf-8")
     mock_unlock.side_effect = SecureBWError("Invalid Master Password")
     
     result = TransactionManager.execute_batch(TEST_PAYLOAD)
@@ -86,14 +91,15 @@ def test_invalid_payload_rejected():
     result = TransactionManager.execute_batch(invalid_raw)
     assert "Error: Invalid transaction payload" in result
 
-@patch('bw_proxy.transaction.WALManager.has_pending_transaction', return_value=False)
-@patch('bw_proxy.transaction.HITLManager.authorize_transaction')
+@patch('bw_proxy.transaction.HITLManager.review_transaction')
+@patch('bw_proxy.transaction.HITLManager.ask_master_password')
 @patch('bw_proxy.transaction.SecureSubprocessWrapper.unlock_vault')
 @patch('bw_proxy.transaction.SecureSubprocessWrapper.execute')
 @patch('bw_proxy.transaction.SecureSubprocessWrapper.execute_json')
-def test_transaction_rollback_lifo(mock_exec_json, mock_exec, mock_unlock, mock_auth, mock_wal):
+def test_transaction_rollback_lifo(mock_exec_json, mock_exec, mock_unlock, mock_ask, mock_review):
     """Test that a mid-flight failure triggers compensating actions in reverse (LIFO) order."""
-    mock_auth.return_value = {"approved": True, "password": bytearray("pw", "utf-8")}
+    mock_review.return_value = True
+    mock_ask.return_value = bytearray("pw", "utf-8")
     mock_unlock.return_value = bytearray("session", "utf-8")
     
     payload = {
@@ -150,8 +156,8 @@ def test_transaction_rollback_lifo(mock_exec_json, mock_exec, mock_unlock, mock_
 
 
 @patch('bw_proxy.transaction.TransactionLogger.log_transaction')
-@patch('bw_proxy.transaction.WALManager.has_pending_transaction', return_value=False)
-@patch('bw_proxy.transaction.HITLManager.authorize_transaction')
+@patch('bw_proxy.transaction.HITLManager.review_transaction')
+@patch('bw_proxy.transaction.HITLManager.ask_master_password')
 @patch('bw_proxy.transaction.SecureSubprocessWrapper.unlock_vault')
 @patch('bw_proxy.transaction.SecureSubprocessWrapper.execute')
 @patch('bw_proxy.transaction.SecureSubprocessWrapper.execute_json')
@@ -159,12 +165,13 @@ def test_transaction_reports_fatal_when_rollback_itself_fails(
     mock_exec_json,
     mock_exec,
     mock_unlock,
-    mock_auth,
-    mock_wal,
+    mock_ask,
+    mock_review,
     mock_log,
 ):
     """A rollback failure must surface as a fatal inconsistent-state error."""
-    mock_auth.return_value = {"approved": True, "password": bytearray("pw", "utf-8")}
+    mock_review.return_value = True
+    mock_ask.return_value = bytearray("pw", "utf-8")
     mock_unlock.return_value = bytearray("session", "utf-8")
 
     payload = {
@@ -201,4 +208,3 @@ def test_transaction_reports_fatal_when_rollback_itself_fails(
     assert "FATAL ERROR" in result
     assert "rollback mechanism also failed" in result
     assert mock_log.call_args.kwargs["status"] == "ROLLBACK_FAILED"
-

@@ -2,10 +2,8 @@ import json
 import os
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime
 from functools import wraps
-from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Union
+from typing import Any, Callable, Dict, Optional
 
 from .config import HITL_VALIDATION_MODE
 from .subprocess_wrapper import SecureBWError, SecureProxyError, SecureSubprocessWrapper, _safe_error_message
@@ -49,29 +47,6 @@ def requires_fresh_sync(func: Callable[..., Any]) -> Callable[..., Any]:
 
 def supports_unlock_lease(func: Callable[..., Any]) -> Callable[..., Any]:
     return _merge_policy(func, supports_unlock_lease=True)
-
-
-def _autosave_result(command_name: str, result: Any) -> Optional[str]:
-    """Saves the result to /tmp/bw_proxy/ for auditing and recovery."""
-    try:
-        import tempfile
-        
-        # We only save successful dictionary results (vault maps, duplicate scans)
-        if not isinstance(result, dict) or result.get("status") != "success":
-            return None
-            
-        timestamp = datetime.now().strftime("%Y%m%dT%H%M%S")
-        safe_name = command_name.replace(" ", "-").lower()
-        save_dir = Path(tempfile.gettempdir()) / "bw_proxy"
-        save_dir.mkdir(parents=True, exist_ok=True)
-        
-        save_path = save_dir / f"{timestamp}_{safe_name}.json"
-        save_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
-        return str(save_path)
-    except Exception as e:
-        # Silently fail on autosave; it's a best-effort convenience
-        sys.stderr.write(f"\n[AUTOSAVE ERROR] {str(e)}\n")
-        return None
 
 
 def _configured_server_url() -> Optional[str]:
@@ -300,12 +275,6 @@ def requires_authenticated_vault(title: str, *, unlock_deferred: bool = False) -
                     "message": f"Operation completed but the vault could not be re-locked: {relock_error}",
                     "operation_result": result,
                 }
-
-            # Handle Autosave Policy
-            if policy.get("autosave_large_result"):
-                save_path = _autosave_result(title, result)
-                if save_path and isinstance(result, dict) and result.get("status") == "success":
-                    result["message"] = f"{result.get('message', '')}\nAlso saved to {save_path}"
 
             if isinstance(result, dict):
                 return result

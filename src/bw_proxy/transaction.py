@@ -156,6 +156,7 @@ class TransactionManager:
         if not payload.operations:
             return "Error: No operations provided in the transaction payload."
             
+        session_key: Optional[bytearray] = None
         owned_context = execution_context is None
         context = execution_context or VaultExecutionContext(
             title="Unlock Vault for Transaction Review",
@@ -163,57 +164,72 @@ class TransactionManager:
             auth_state="locked",
             unlock_deferred=True,
         )
-        
         try:
-            # 1. Resolve target names for display (requires session if available)
-            id_to_name = {}
-            if context.session_key:
+            if owned_context:
+                master_password = None
                 try:
-                    id_to_name = TransactionManager._resolve_action_names(payload.operations, context.session_key)
-                except Exception:
-                    pass # Fallback to UUIDs if name resolution fails initially
-            
-            # 2. Combined Review + Password Prompt
-            approval = HITLManager.authorize_transaction(
-                payload, 
-                id_to_name=id_to_name, 
-                needs_password=context.session_key is None
-            )
-            
-            if not approval.get("approved"):
-                return "Transaction aborted by the user."
-
-            # 3. Open session if needed
-            if context.session_key is None:
-                try:
-                    open_vault_session(
-                        context,
-                        title="Unlock Vault for Transaction Review",
-                        master_password=approval.get("password"),
-                    )
+                    master_password = HITLManager.ask_master_password(title="Unlock Vault for Transaction Review")
                 except Exception as e:
-                    return f"Transaction failed during unlock: {_safe_error_message(e)}"
+                    return f"Transaction aborted: {_safe_error_message(e)}"
+                if not master_password:
+                    return "Transaction aborted by the user."
 
-            # 4. Resolve names AGAIN if they weren't resolved before (now we have a session)
-            if not id_to_name:
-                 try:
-                    id_to_name = TransactionManager._resolve_action_names(payload.operations, context.session_key)
-                 except SecureBWError as e:
+                try:
+                    session_key = SecureSubprocessWrapper.unlock_vault(master_password)
+                except SecureBWError as e:
+                    return f"Transaction failed during unlock: {str(e)}"
+
+                try:
+                    SecureSubprocessWrapper.execute(["sync"], session_key)
+                except SecureBWError as e:
+                    return f"Transaction failed during sync: {str(e)}"
+
+                try:
+                    id_to_name = TransactionManager._resolve_action_names(payload.operations, session_key)
+                except SecureBWError as e:
                     return f"Transaction failed during target resolution: {str(e)}"
 
-            # 5. Ensure fresh sync
-            try:
-                ensure_fresh_sync(context)
-            except SecureBWError as e:
-                return f"Transaction failed during sync: {str(e)}"
+                if not HITLManager.review_transaction(payload, id_to_name=id_to_name):
+                    return "Transaction aborted by the user."
+            else:
+                try:
+                    if context.session_key is not None:
+                        try:
+                            id_to_name = TransactionManager._resolve_action_names(payload.operations, context.session_key)
+                        except SecureBWError as e:
+                            return f"Transaction failed during target resolution: {str(e)}"
+                        approval = HITLManager.authorize_transaction(payload, id_to_name=id_to_name, needs_password=False)
+                    else:
+                        approval = HITLManager.authorize_transaction(payload, id_to_name={}, needs_password=True)
+                except Exception as e:
+                    return f"Transaction aborted: {_safe_error_message(e)}"
 
-            session_key = context.session_key
-            if session_key is None:
-                return "Transaction failed: no active Bitwarden session is available."
+                if not approval.get("approved"):
+                    return "Transaction aborted by the user."
 
-            recovery_msg = TransactionManager.check_recovery(session_key)
-            if recovery_msg:
-                return recovery_msg
+                if context.session_key is None:
+                    try:
+                        open_vault_session(
+                            context,
+                            title="Unlock Vault for Transaction Review",
+                            master_password=approval.get("password"),
+                        )
+                    except Exception as e:
+                        return f"Transaction failed during unlock: {_safe_error_message(e)}"
+
+                try:
+                    ensure_fresh_sync(context)
+                except SecureBWError as e:
+                    return f"Transaction failed during sync: {str(e)}"
+
+                session_key = context.session_key
+                if session_key is None:
+                    return "Transaction failed: no active Bitwarden session is available."
+
+            if not owned_context:
+                recovery_msg = TransactionManager.check_recovery(session_key)
+                if recovery_msg:
+                    return recovery_msg
                 
             results = []
             executed_ops: List[str] = []

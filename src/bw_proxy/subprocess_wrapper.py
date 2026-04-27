@@ -123,8 +123,7 @@ def _safe_error_message(e: Exception) -> str:
     # Internal Transparency: Log the real error to stderr so the human architect
     # can see it in terminal/container logs, but the AI only sees the redacted version.
     import traceback
-    exc_trace = "".join(traceback.format_exception(type(e), e, e.__traceback__))
-    print(f"\n[INTERNAL ERROR DEBUG]\n{exc_trace}", file=sys.stderr)
+    print(f"\n[INTERNAL ERROR DEBUG]\n{traceback.format_exc()}", file=sys.stderr)
     
     return f"{type(e).__name__}: An internal error occurred. Check server logs for details."
 
@@ -169,7 +168,7 @@ class SecureSubprocessWrapper:
                 ["bw", "login", email, "--passwordenv", BW_PASSWORD_ENV, "--raw"],
                 capture_output=True,
                 text=False,
-                env={**os.environ, BW_PASSWORD_ENV: master_password.decode('utf-8'), "BW_NO_COLOR": "1", "BW_CHECK_FOR_UPDATES": "false"},
+                env=env,
                 check=False,
                 timeout=BW_CLI_TIMEOUT_SECONDS,
                 stdin=subprocess.DEVNULL,
@@ -225,7 +224,7 @@ class SecureSubprocessWrapper:
                 ["bw", "unlock", "--passwordenv", BW_PASSWORD_ENV, "--raw"],
                 capture_output=True,
                 text=False,
-                env={**os.environ, BW_PASSWORD_ENV: master_password.decode('utf-8'), "BW_NO_COLOR": "1", "BW_CHECK_FOR_UPDATES": "false"},
+                env=env,
                 check=False,
                 timeout=BW_CLI_TIMEOUT_SECONDS,
                 stdin=subprocess.DEVNULL,
@@ -257,15 +256,9 @@ class SecureSubprocessWrapper:
         The session key is passed via environment variable and immediately scrubbed.
         """
         env = os.environ.copy()
-        env.update({
-            BW_SESSION_ENV: session_key.decode("utf-8"),
-            "BW_NO_COLOR": "1",
-            "BW_CHECK_FOR_UPDATES": "false",
-            "BW_SKIP_CONFIG_CHECK": "true",
-        })
+        env[BW_SESSION_ENV] = session_key.decode("utf-8")
 
         cmd = ["bw"] + args
-
         try:
             result = subprocess.run(
                 cmd,
@@ -279,8 +272,6 @@ class SecureSubprocessWrapper:
 
             if result.returncode != 0:
                 err_clean = result.stderr.decode("utf-8", errors="replace").strip() if result.stderr else "Unknown error"
-                # Note: internal debug logs might show this, but structural redactor 
-                # will still be used for the command part.
                 raise SecureBWError(f"Bitwarden command {_sanitize_args_for_log(args)} failed: {err_clean}")
 
             return result.stdout.decode("utf-8", errors="replace").strip()
@@ -316,21 +307,11 @@ class SecureSubprocessWrapper:
     def execute_json(args: List[str], session_key: bytearray) -> dict | list:
         """
         Executes a bitwarden command and strictly parses the JSON response.
-        Attempts to scrape JSON from stdout to handle leading/trailing noise.
         """
         raw = SecureSubprocessWrapper.execute(args, session_key)
         try:
             return json.loads(raw)
         except json.JSONDecodeError:
-            # Fallback: Bitwarden sometimes prints "Checking for updates..." or other
-            # informational noise to stdout before the JSON. We attempt to extract
-            # the first valid JSON block.
-            match = re.search(r'([\[{].*[\]}])', raw, re.DOTALL)
-            if match:
-                try:
-                    return json.loads(match.group(1))
-                except json.JSONDecodeError:
-                    pass
             raise SecureBWError("Bitwarden CLI returned non-JSON data.")
 
     @staticmethod
@@ -344,7 +325,6 @@ class SecureSubprocessWrapper:
                 cmd,
                 capture_output=True,
                 text=False,
-                env={**os.environ, "BW_NO_COLOR": "1", "BW_CHECK_FOR_UPDATES": "false"},
                 check=False,
                 timeout=BW_CLI_TIMEOUT_SECONDS,
                 stdin=subprocess.DEVNULL,

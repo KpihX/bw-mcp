@@ -18,10 +18,6 @@ All notable changes to this project, from its inception to the current secure st
 - **Combined validation flow**: browser/TUI validation now supports password+review in one `prompt_review` flow, removing the useless intermediate “continue” approval between unlock and final action review.
 - **Transaction auth centralization**: transaction/refactor commands now use the same runtime/auth policy layer as the rest of `do`, instead of a disconnected login/unlock path.
 - **WAL keyed by session secret**: WAL encryption/recovery is now aligned with the active Bitwarden session secret, allowing Docker unlock leases to remain compatible with ACID transaction recovery without storing the Master Password.
-### 🛠️ Subprocess & CLI Hardening
-- **CLI noise suppression**: added `BW_NO_COLOR`, `BW_CHECK_FOR_UPDATES`, and `BW_SKIP_CONFIG_CHECK` to the subprocess environment to minimize informational stdout pollution.
-- **Regex JSON scraping**: implemented a robust fallback in `execute_json` that scrapes valid JSON blocks from stdout using regex, allowing the proxy to recover structured data even when the Bitwarden CLI emits unexpected trailing or leading noise.
-- **Traceback logging**: internal subprocess errors now log full tracebacks to `stderr` (visible to the architect) while returning sanitized, redacted messages to the AI.
 
 ### 🧪 Verification
 - **Coverage expansion**: added regression coverage for Docker unlock/lock behavior, command policy metadata, and selective autosave behavior.
