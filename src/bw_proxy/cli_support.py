@@ -193,6 +193,8 @@ def _normalize_admin_payload(data: Any, command_name: Optional[str]) -> Any:
         config = payload.get("config") or {}
         wal = payload.get("wal") or {}
         unlock_lease = payload.get("unlock_lease") or {}
+        daemon = payload.get("daemon") or {}
+
         server_url = (
             bitwarden_status.get("serverUrl")
             or configured_auth.get("server_url")
@@ -200,8 +202,16 @@ def _normalize_admin_payload(data: Any, command_name: Optional[str]) -> Any:
             or None
         )
         user_email = bitwarden_status.get("userEmail") or configured_auth.get("user_email") or None
+        
+        raw_auth_status = bitwarden_status.get("status")
+        lease_state = unlock_lease.get("state")
+        effective_auth_status = raw_auth_status
+        if raw_auth_status == "locked" and lease_state == "active":
+            effective_auth_status = "unlocked (lease)"
+
         auth = {
-            "status": bitwarden_status.get("status"),
+            "status": effective_auth_status,
+            "cli_status": raw_auth_status if effective_auth_status != raw_auth_status else None,
             "server_url": server_url,
             "user_email": user_email,
             "user_id": bitwarden_status.get("userId"),
@@ -212,6 +222,7 @@ def _normalize_admin_payload(data: Any, command_name: Optional[str]) -> Any:
             "status": payload.get("status"),
             "message": payload.get("message"),
             "auth": {k: v for k, v in auth.items() if v is not None},
+            "daemon": {k: v for k, v in daemon.items() if v is not None and v != "unsupported"},
             "wal": {
                 "state": wal_state,
                 "file": wal.get("file"),

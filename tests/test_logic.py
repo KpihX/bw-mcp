@@ -138,7 +138,7 @@ def test_admin_unlock_creates_docker_unlock_lease(
     assert result["duration_seconds"] == 300
     mock_unlock.assert_called_once()
     mock_create.assert_called_once()
-    mock_relock.assert_called_once()
+    mock_relock.assert_not_called()
 
 
 @patch("bw_proxy.logic.is_docker_runtime", return_value=False)

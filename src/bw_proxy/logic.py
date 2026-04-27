@@ -43,6 +43,7 @@ from .vault_runtime import (
 )
 from .web_ui import WebEditorManager
 from .wal import WAL_FILE
+from .daemon import read_pid, is_running
 
 
 def _result(status: str, message: str, **extra: Any) -> Dict[str, Any]:
@@ -342,6 +343,14 @@ def get_admin_status() -> Dict[str, Any]:
             "message": "A stale unlock lease was cleared because Bitwarden is logged out.",
         }
 
+    daemon_info = {"status": "unsupported"}
+    if is_docker_runtime():
+        pid = read_pid()
+        if pid and is_running(pid):
+            daemon_info = {"status": "running", "pid": pid}
+        else:
+            daemon_info = {"status": "stopped"}
+
     pending_wal = WALManager.has_pending_transaction()
 
     return _success(
@@ -366,6 +375,7 @@ def get_admin_status() -> Dict[str, Any]:
             "max_batch_size": MAX_BATCH_SIZE,
             "validation_mode": HITL_VALIDATION_MODE,
         },
+        daemon=daemon_info,
         unlock_lease=lease_status,
     )
 
@@ -406,14 +416,6 @@ def admin_unlock() -> Dict[str, Any]:
             server_url=status.get("serverUrl") or os.environ.get("BW_URL"),
             user_email=status.get("userEmail") or os.environ.get("BW_EMAIL"),
         )
-        try:
-            _relock_vault()
-        except Exception as exc:
-            UnlockLeaseManager.clear()
-            return _error(
-                "Unlock lease creation failed because the vault could not be re-locked safely. "
-                f"Lease discarded. {_safe_error_message(exc)}"
-            )
         return _success(
             "Docker unlock lease created.",
             unlock_lease=UnlockLeaseManager.status(),

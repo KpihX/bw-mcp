@@ -147,30 +147,33 @@ def mcp_daemon() -> None:
     import time
     from .unlock_lease import UnlockLeaseManager
 
-    lease_mgr = UnlockLeaseManager()
-    console.print("🚀 [Daemon] Runtime keep-alive started.")
-    
-    # Initial grace period to allow 'admin unlock' to be called
-    grace_period_end = time.time() + 300 
-    
+    write_pid(os.getpid())
     try:
+        lease_mgr = UnlockLeaseManager()
+        console.print("🚀 [Daemon] Runtime keep-alive started.")
+        
+        # Initial grace period to allow 'admin unlock' to be called
+        grace_period_end = time.time() + 300 
+        
         while True:
             lease = lease_mgr.get_lease()
-            if not lease:
-                if time.time() > grace_period_end:
-                    console.print("ℹ️ [Daemon] No active lease after grace period. Exiting.")
-                    break
-            elif lease_mgr.is_expired(lease):
-                console.print("ℹ️ [Daemon] Lease expired. Exiting.")
-                break
-            else:
+            is_valid = lease and not lease_mgr.is_expired(lease)
+            
+            if is_valid:
                 # Reset grace period if we have a valid lease
                 grace_period_end = time.time() + 60
-                
+            elif time.time() > grace_period_end:
+                if lease:
+                    console.print("ℹ️ [Daemon] Lease expired and grace period ended. Exiting.")
+                else:
+                    console.print("ℹ️ [Daemon] No active lease after grace period. Exiting.")
+                break
+            
             time.sleep(5)
     except KeyboardInterrupt:
         console.print("ℹ️ [Daemon] Interrupted.")
     finally:
+        clear_pid()
         console.print("🏁 [Daemon] Runtime keep-alive stopped.")
 
 

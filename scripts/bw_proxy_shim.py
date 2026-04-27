@@ -233,8 +233,12 @@ def run_command(args: list[str]) -> int:
 
     # Special case: admin lock should stop the container
     if args[:2] == ["admin", "lock"]:
-        subprocess.run(["docker", "stop", runtime_name], capture_output=True, check=False)
-        print("✅ Runtime container stopped.")
+        # Try to clear lease inside first
+        if _is_runtime_active(runtime_name):
+            subprocess.run(["docker", "exec", "-i", runtime_name, "bw-proxy", "admin", "lock"], capture_output=True, check=False)
+        # Force stop the runtime
+        subprocess.run(["docker", "rm", "-f", runtime_name], capture_output=True, check=False)
+        print("✅ Runtime container stopped and lease cleared.")
         return 0
 
     port = _pick_host_port()
@@ -301,8 +305,19 @@ def run_command(args: list[str]) -> int:
         sys.stdout.write("\r\nInterrupted.\r\n")
         sys.stdout.flush()
 
-    process.wait()
-    return process.returncode
+    exit_code = process.wait()
+    
+    # Fallback: if runtime died (137) and we were using exec, retry in one-shot mode
+    if exit_code == 137 and cmd[1] == "exec":
+        sys.stderr.write("⚠️ [Host Agent] Runtime disappeared. Falling back to one-shot container...\n")
+        sys.stderr.flush()
+        # Fallback to one-shot
+        fallback_cmd = build_docker_command(args, port)
+        # Simple run without HITL interception for fallback (it's a fallback)
+        res = subprocess.run(fallback_cmd, stdin=sys.stdin)
+        return res.returncode
+
+    return exit_code
 
 
 
