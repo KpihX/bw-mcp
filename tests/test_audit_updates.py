@@ -86,17 +86,21 @@ def test_move_to_collection_syntax(mock_exec_json, mock_exec):
     assert args[3] == expected_b64
     assert "Collections: ['col1', 'col2']" in msg
 
+@patch('bw_proxy.vault_runtime.load_bw_status', return_value={"status": "locked", "serverUrl": "https://vault.example.com", "userEmail": "agent@example.com"})
+@patch('bw_proxy.vault_runtime.validate_authenticated_context', return_value=None)
+@patch('bw_proxy.logic.TransactionManager.check_recovery', return_value=None)
 @patch('bw_proxy.logic.SecureSubprocessWrapper.unlock_vault')
+@patch('bw_proxy.logic.SecureSubprocessWrapper.execute', return_value="")
 @patch('bw_proxy.logic.SecureSubprocessWrapper.execute_json')
 @patch('bw_proxy.logic.SecureSubprocessWrapper.audit_compare_secrets')
 @patch('bw_proxy.logic.HITLManager.ask_master_password')
-@patch('bw_proxy.logic.HITLManager.review_comparisons')
-def test_compare_secrets_batch_tool(mock_review, mock_ask, mock_compare, mock_exec_json, mock_unlock):
+@patch('bw_proxy.logic.HITLManager.authorize_comparisons')
+def test_compare_secrets_batch_tool(mock_authorize, mock_ask, mock_compare, mock_exec_json, mock_exec, mock_unlock, mock_recovery, mock_validate, mock_status):
     """Test the full tool flow for compare_secrets_batch."""
     mock_ask.return_value = bytearray("pw", "utf-8")
     mock_unlock.return_value = bytearray("session", "utf-8")
     mock_exec_json.return_value = [] # for id_to_name
-    mock_review.return_value = True
+    mock_authorize.return_value = {"approved": True, "password": bytearray("pw", "utf-8")}
     mock_compare.return_value = True # Match
     
     payload = BatchComparePayload(
@@ -109,8 +113,7 @@ def test_compare_secrets_batch_tool(mock_review, mock_ask, mock_compare, mock_ex
         ]
     )
     
-    result_json = compare_secrets_batch(payload)
-    result = json.loads(result_json)
+    result = compare_secrets_batch(payload)
     
     assert result["status"] == "success"
     assert len(result["results"]) == 1
@@ -166,23 +169,19 @@ def testfetch_template_internal(mock_ask, mock_exec, mock_unlock):
         rationale="Safe",
         operations=[CreateFolderAction(name="New")]
     )
-    # We need to mock the Zenity call so we don't block
-    with patch('subprocess.run') as mock_run:
-        mock_run.return_value = MagicMock(returncode=0, stdout=b"OK")
+    with patch('bw_proxy.ui.WebHITLManager.request_approval') as mock_request:
+        mock_request.return_value = {"approved": True}
         HITLManager.review_transaction(payload_safe, {})
-        # Check command list sent to Zenity
-        zenity_args = mock_run.call_args[0][0]
-        # In a safe transaction, it should NOT have the red icon name
-        assert "--icon-name=dialog-warning" not in zenity_args
+        web_data = mock_request.call_args.args[0]
+        assert web_data["has_destructive"] is False
 
     # 2. Destructive (Delete Item)
     payload_danger = TransactionPayload(
         rationale="Danger",
         operations=[DeleteItemAction(target_id="1")]
     )
-    with patch('subprocess.run') as mock_run:
-        mock_run.return_value = MagicMock(returncode=0, stdout=b"OK")
+    with patch('bw_proxy.ui.WebHITLManager.request_approval') as mock_request:
+        mock_request.return_value = {"approved": True}
         HITLManager.review_transaction(payload_danger, {"1": "Item1"})
-        zenity_args = mock_run.call_args[0][0]
-        # SHOULD have the warning icon
-        assert "--icon-name=dialog-warning" in zenity_args
+        web_data = mock_request.call_args.args[0]
+        assert web_data["has_destructive"] is True

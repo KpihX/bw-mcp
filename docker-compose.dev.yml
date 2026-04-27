@@ -3,14 +3,12 @@ services:
     volumes:
       - .:/app
       - bw-data:/data
-    entrypoint: ["python", "-m", "bw_proxy.main"]
-    command: ["serve"]
     environment:
       - BW_URL=${BW_URL:-https://vault.kpihx-labs.com}
       - BW_EMAIL=${BW_EMAIL}
       - PYTHONDONTWRITEBYTECODE=1
       - PYTHONUNBUFFERED=1
       - HOME=/data
-      - HITL_HOST=0.0.0.0
+      - HITL_HOST=127.0.0.1
       - PATH=/opt/venv/bin:/data/.local/bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       - PYTHONPATH=/app/src

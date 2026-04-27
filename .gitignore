@@ -19,3 +19,11 @@ VIBE.md
 COPILOT.md
 .agent/
 .agents/
+
+# Local scratch artifacts
+scratch/live_*
+scratch/test_type.py
+scratch/__pycache__/
+
+# Accidental literal shell-variable paths / local state pollution
+*XDG_STATE_HOME*

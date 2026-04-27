@@ -15,7 +15,7 @@ WAL_DIR = os.path.join(STATE_DIR, "wal")
 WAL_FILE = os.path.join(WAL_DIR, "pending_transaction.wal")  # .wal = encrypted blob
 
 
-def _derive_key(master_password: bytearray, salt: bytes) -> bytes:
+def _derive_key(session_key: bytearray, salt: bytes) -> bytes:
     """
     Derives a Fernet-compatible 32-byte key from the BW session key using PBKDF2.
 
@@ -25,8 +25,9 @@ def _derive_key(master_password: bytearray, salt: bytes) -> bytes:
     - The salt ensures that two identical session keys produce different
       derived keys across different transactions.
 
-    The session_key is itself a derivative of the Bitwarden master password,
-    so we get layered key derivation: MasterPassword → BW_SESSION → PBKDF2 → Fernet key.
+    The active Bitwarden session key is itself short-lived and tied to the
+    authenticated vault unlock, so we get layered protection:
+    BW_SESSION → PBKDF2 → Fernet key.
     """
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
@@ -34,7 +35,7 @@ def _derive_key(master_password: bytearray, salt: bytes) -> bytes:
         salt=salt,
         iterations=WAL_PBKDF2_ITERATIONS,
     )
-    raw_key = kdf.derive(bytes(master_password))
+    raw_key = kdf.derive(bytes(session_key))
     return base64.urlsafe_b64encode(raw_key)
 
 
@@ -57,10 +58,10 @@ class WALManager:
             os.makedirs(WAL_DIR, exist_ok=True)
 
     @staticmethod
-    def write_wal(transaction_id: str, reversed_operations: List[Dict[str, Any]], master_password: bytearray) -> None:
+    def write_wal(transaction_id: str, reversed_operations: List[Dict[str, Any]], session_key: bytearray) -> None:
         """
         Write the reversed list of operations (compensating actions) to the WAL.
-        The WAL payload is AES-encrypted using the master password.
+        The WAL payload is encrypted using the active Bitwarden session key.
         """
         WALManager._ensure_dir()
         payload = {
@@ -72,7 +73,7 @@ class WALManager:
 
         # Generate a fresh random salt per write
         salt = os.urandom(WAL_SALT_LENGTH)
-        key = _derive_key(master_password, salt)
+        key = _derive_key(session_key, salt)
         fernet = Fernet(key)
         ciphertext = fernet.encrypt(json_data)
 
@@ -85,7 +86,7 @@ class WALManager:
         os.chmod(WAL_FILE, 0o600)
 
     @staticmethod
-    def read_wal(master_password: bytearray) -> Optional[Dict[str, Any]]:
+    def read_wal(session_key: bytearray) -> Optional[Dict[str, Any]]:
         """
         Read and decrypt the current WAL.
         Returns the payload dict if successful, or None if WAL doesn't exist.
@@ -101,7 +102,7 @@ class WALManager:
             if len(salt) != WAL_SALT_LENGTH or not ciphertext:
                 return None # Corrupted or incomplete WAL file
 
-            key = _derive_key(master_password, salt)
+            key = _derive_key(session_key, salt)
             fernet = Fernet(key)
             plaintext = fernet.decrypt(ciphertext)
             return json.loads(plaintext)
@@ -109,14 +110,14 @@ class WALManager:
             raise ValueError(f"Failed to decrypt or parse WAL: {e}") from e
 
     @staticmethod
-    def pop_rollback_command(transaction_id: str, master_password: bytearray) -> None:
+    def pop_rollback_command(transaction_id: str, session_key: bytearray) -> None:
         """
         Pops the first command from the rollback list in the WAL and saves it.
         This provides idempotency: if the proxy crashes DURING a rollback execution,
         it won't re-execute successful rollback commands on the next boot.
         """
         try:
-            payload = WALManager.read_wal(master_password)
+            payload = WALManager.read_wal(session_key)
             if not payload or payload.get("transaction_id") != transaction_id:
                 return
                 
@@ -126,7 +127,7 @@ class WALManager:
                 
             commands.pop(0) # Remove the most recently executed command
             payload["rollback_commands"] = commands
-            WALManager.write_wal(transaction_id, commands, master_password)
+            WALManager.write_wal(transaction_id, commands, session_key)
         except Exception:
             # WARNING: If this fails, the WAL won't be updated after a successful
             # rollback command. On next boot, the proxy may re-execute it.

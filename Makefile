@@ -9,7 +9,12 @@ REAL_UID  := $(shell id -u $(REAL_USER))
 REAL_GID  := $(shell id -g $(REAL_USER))
 ZSH_LOGIN := zsh -l -c
 UV        := $(shell command -v uv 2>/dev/null || ls $(REAL_HOME)/.local/bin/uv 2>/dev/null || echo uv)
+PYTHON    := $(UV) run python
+PYTEST    := $(PYTHON) -m pytest
 APPARMOR_TARGET := /etc/apparmor.d/opt.bw-proxy.bin.bw-proxy
+DOCKER_IMAGE := $(PKG_NAME):latest
+DOCKER_VOLUME := bw_mcp_bw-data
+DOCKER_ENV_PATH := $(REAL_HOME)/.bw/proxy/docker.env
 
 help:  ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | \
@@ -27,53 +32,79 @@ install: link ## Classic user-space CLI install
 
 uninstall: unlink ## Classic user-space CLI uninstall
 
-test:  ## Run pytest
-	@$(UV) run python -m pytest -q
+test: ## Run the full pytest suite
+	@$(PYTEST) -q
 
-check:  ## py_compile + pytest
+test-cli: ## Run CLI-focused pytest coverage only
+	@$(PYTEST) -q tests/test_cli_audit.py tests/test_daemon.py tests/test_docker_shim.py tests/test_logic.py
+
+test-core: ## Run the non-benchmark pytest suite
+	@$(PYTEST) -q tests
+
+bench-cli: ## Run the ad hoc CLI performance benchmark
+	@$(PYTHON) scripts/perf_audit.py
+
+check:  ## py_compile + pytest + CLI audit
 	@python3 -m py_compile $$(find src tests -name '*.py' 2>/dev/null)
-	@$(UV) run python -m pytest -q
+	@$(MAKE) test
+
+clean-scratch: ## Remove transient scratch artifacts that should never be committed
+	@find scratch -maxdepth 1 \( -name 'live_*' -o -name 'test_type.py' \) -delete
+	@find scratch -type d -name '__pycache__' -prune -exec rm -rf {} +
 
 # ── Docker ───────────────────────────────────────────────────────────────────
 
 docker-build: ## Build the BW-Proxy Docker image (No-Cache)
-	@docker compose build --no-cache
+	@docker build --no-cache -t $(DOCKER_IMAGE) .
 
-docker-up: ## Start the BW-Proxy container (Detached)
-	@UID=$(REAL_UID) GID=$(REAL_GID) docker compose up -d
+docker-volume: ## Ensure the persistent Docker data volume exists
+	@docker volume create $(DOCKER_VOLUME) > /dev/null
 
-docker-link: ## Create an agnostic host-side wrapper to execute commands in the container
+docker-config: ## Sync non-secret Docker runtime config to ~/.bw/proxy/docker.env
+	@mkdir -p $(REAL_HOME)/.bw/proxy
+	@if [ -f .env ]; then \
+		cp .env $(DOCKER_ENV_PATH); \
+		echo "✅ Synced .env to $(DOCKER_ENV_PATH)"; \
+	elif [ ! -f $(DOCKER_ENV_PATH) ]; then \
+		cp .env.example $(DOCKER_ENV_PATH); \
+		echo "✅ Seeded $(DOCKER_ENV_PATH) from .env.example"; \
+	else \
+		echo "✅ Keeping existing Docker env at $(DOCKER_ENV_PATH)"; \
+	fi
+
+docker-link: ## Create an agnostic host-side wrapper (symlink) to execute commands in the container
 	@mkdir -p $(REAL_HOME)/.local/bin
-	@cp scripts/bw_proxy_shim.py $(REAL_HOME)/.local/bin/$(PKG_NAME)
-	@chmod +x $(REAL_HOME)/.local/bin/$(PKG_NAME)
-	@echo "✅ Agnostic host-to-Docker wrapper installed in $(REAL_HOME)/.local/bin/$(PKG_NAME)"
+	@chmod +x scripts/bw_proxy_shim.py
+	@ln -sf $(CURDIR)/scripts/bw_proxy_shim.py $(REAL_HOME)/.local/bin/$(PKG_NAME)
+	@echo "✅ Agnostic host-to-Docker wrapper (symlink) installed in $(REAL_HOME)/.local/bin/$(PKG_NAME)"
 
-docker-install: docker-uninstall docker-build docker-up docker-link ## Full Docker installation (clean + build + up + link)
+docker-install: docker-build docker-volume docker-config docker-link ## Full Docker installation for the ephemeral runtime
 
-docker-dev: docker-down docker-link ## Start in Development mode (Clean + Build + Up)
-	@UID=$(REAL_UID) GID=$(REAL_GID) docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
-	@echo "🛠️ BW-Proxy is running in DEV mode (Live Sync enabled)"
+docker-up: docker-build docker-volume docker-config docker-link ## Prepare the Docker runtime (no long-lived MCP container)
+	@echo "✅ Docker runtime prepared. BW-Proxy now starts one ephemeral container per invocation."
 
-docker-down: ## Stop and remove the BW-Proxy container
-	@UID=$(REAL_UID) GID=$(REAL_GID) docker compose down
+docker-dev: docker-build docker-volume docker-config docker-link ## Build the image and sync config for source-level Docker work
+	@echo "🛠️ Dev image ready. Use: docker compose -f docker-compose.yml -f docker-compose.dev.yml run --rm bw-proxy <args>"
 
-docker-uninstall: docker-down ## Remove Docker image and wrapper, keep user data
+docker-down: ## No-op: the Docker runtime is ephemeral and leaves no daemon container behind
+	@echo "ℹ️ Nothing to stop. BW-Proxy Docker mode runs one-shot containers only."
+
+docker-uninstall: ## Remove Docker image and wrapper, keep persistent data
 	@echo "🗑️ Removing BW-Proxy Docker artifacts..."
 	@rm -f $(REAL_HOME)/.local/bin/$(PKG_NAME)
-	@docker rmi $(PKG_NAME):latest 2>/dev/null || true
-	@docker rmi bw_mcp-bw-proxy:latest 2>/dev/null || true
-	@echo "✅ Docker uninstall complete (image and wrapper removed)."
+	@docker rmi $(DOCKER_IMAGE) 2>/dev/null || true
+	@echo "✅ Docker uninstall complete (image and wrapper removed, data preserved)."
 
 docker-purge: docker-uninstall ## Destructive: remove Docker volume too
 	@echo "🔥 Purging Docker volume..."
-	@docker volume rm bw_mcp_bw-data 2>/dev/null || true
+	@docker volume rm $(DOCKER_VOLUME) 2>/dev/null || true
 	@echo "✅ Docker volume removed."
 
-docker-logs: ## Follow Docker logs (interactive)
-	@docker compose logs -f
+docker-logs: ## No-op: ephemeral runtime has no shared daemon log stream
+	@echo "ℹ️ No persistent container logs. Run commands via bw-proxy or docker compose run --rm."
 
-docker-logs-all: ## Dump all Docker logs
-	@docker compose logs
+docker-logs-all: ## No-op: ephemeral runtime has no shared daemon log stream
+	@echo "ℹ️ No persistent container logs. Run commands via bw-proxy or docker compose run --rm."
 
 # ── Prod (Sovereign Root) ────────────────────────────────────────────────────
 

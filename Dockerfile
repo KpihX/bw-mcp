@@ -34,7 +34,7 @@ FROM python:3.12-slim-bookworm
 
 LABEL org.opencontainers.image.title="BW-Proxy" \
       org.opencontainers.image.description="Sovereign security-hardened blind hub for Bitwarden & AI" \
-      org.opencontainers.image.version="2.4.0" \
+      org.opencontainers.image.version="2.5.0" \
       org.opencontainers.image.authors="KAMDEM Ivann (KpihX)" \
       org.opencontainers.image.source="https://github.com/KpihX/bw-proxy"
 
@@ -65,4 +65,3 @@ RUN groupadd --gid 1000 bwproxy \
 USER bwproxy:bwproxy
 VOLUME [ "/data" ]
 ENTRYPOINT [ "python", "-m", "bw_proxy.main" ]
-CMD [ "serve" ]

@@ -1,7 +1,7 @@
 proxy:
   name: BW-Proxy
   state_directory: ~/.bw/proxy
-  max_batch_size: 15
+  max_batch_size: 17
 redaction:
   populated_tag: '[REDACTED_BY_PROXY_POPULATED]'
   empty_tag: '[REDACTED_BY_PROXY_EMPTY]'
@@ -22,3 +22,10 @@ hitl:
   host: 127.0.0.1
   port: 1138
   auto_open: true
+  # validation_mode controls the preferred human-validation transport.
+  # Allowed values:
+  # - browser: default. Use the browser HITL UI first, then fall back to the terminal if needed.
+  # - terminal: prefer terminal/TUI validation first, then fall back to the browser if no interactive terminal is available.
+  validation_mode: browser
+docker_unlock:
+  max_duration_seconds: 300

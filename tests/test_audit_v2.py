@@ -6,12 +6,16 @@ from bw_proxy.models import FindDuplicatesPayload, BatchComparePayload, CompareS
 import json
 import base64
 
+@patch('bw_proxy.vault_runtime.load_bw_status', return_value={"status": "locked", "serverUrl": "https://vault.example.com", "userEmail": "agent@example.com"})
+@patch('bw_proxy.vault_runtime.validate_authenticated_context', return_value=None)
+@patch('bw_proxy.logic.TransactionManager.check_recovery', return_value=None)
 @patch('bw_proxy.logic.SecureSubprocessWrapper.unlock_vault')
+@patch('bw_proxy.logic.SecureSubprocessWrapper.execute', return_value="")
 @patch('bw_proxy.logic.SecureSubprocessWrapper.execute_json')
 @patch('bw_proxy.logic.SecureSubprocessWrapper.audit_bulk_compare')
 @patch('bw_proxy.logic.HITLManager.ask_master_password')
-@patch('bw_proxy.logic.HITLManager.review_duplicate_scan')
-def test_find_item_duplicates_tool(mock_review, mock_ask, mock_bulk, mock_exec_json, mock_unlock):
+@patch('bw_proxy.logic.HITLManager.authorize_duplicate_scan')
+def test_find_item_duplicates_tool(mock_authorize, mock_ask, mock_bulk, mock_exec_json, mock_exec, mock_unlock, mock_recovery, mock_validate, mock_status):
     """Test the find_item_duplicates tool flow."""
     mock_ask.return_value = bytearray("pw", "utf-8")
     mock_unlock.return_value = bytearray("session", "utf-8")
@@ -27,7 +31,7 @@ def test_find_item_duplicates_tool(mock_review, mock_ask, mock_bulk, mock_exec_j
         {"id": "target", "type": 1} # for get item target
     ]
     
-    mock_review.return_value = True
+    mock_authorize.return_value = {"approved": True, "password": bytearray("pw", "utf-8")}
     mock_bulk.return_value = ["cand1"] # Only cand1 matches
     
     payload = FindDuplicatesPayload(
@@ -36,8 +40,7 @@ def test_find_item_duplicates_tool(mock_review, mock_ask, mock_bulk, mock_exec_j
         field="login.password"
     )
     
-    res_json = find_item_duplicates(payload)
-    res = json.loads(res_json)
+    res = find_item_duplicates(payload)
     
     assert res["status"] == "success"
     assert res["duplicate_ids"] == ["cand1"]
@@ -66,17 +69,21 @@ def test_audit_dynamic_field_resolution():
         )
     assert "Invalid field target namespace" in str(exc.value)
 
+@patch('bw_proxy.vault_runtime.load_bw_status', return_value={"status": "locked", "serverUrl": "https://vault.example.com", "userEmail": "agent@example.com"})
+@patch('bw_proxy.vault_runtime.validate_authenticated_context', return_value=None)
+@patch('bw_proxy.logic.TransactionManager.check_recovery', return_value=None)
 @patch('bw_proxy.logic.SecureSubprocessWrapper.unlock_vault')
+@patch('bw_proxy.logic.SecureSubprocessWrapper.execute', return_value="")
 @patch('bw_proxy.logic.SecureSubprocessWrapper.execute_json')
 @patch('bw_proxy.logic.SecureSubprocessWrapper.audit_compare_secrets')
 @patch('bw_proxy.logic.HITLManager.ask_master_password')
-@patch('bw_proxy.logic.HITLManager.review_comparisons')
-def test_compare_secrets_batch_v2(mock_review, mock_ask, mock_compare, mock_exec_json, mock_unlock):
+@patch('bw_proxy.logic.HITLManager.authorize_comparisons')
+def test_compare_secrets_batch_v2(mock_authorize, mock_ask, mock_compare, mock_exec_json, mock_exec, mock_unlock, mock_recovery, mock_validate, mock_status):
     """Test that batch compare now accepts dynamic strings."""
     mock_ask.return_value = bytearray("pw", "utf-8")
     mock_unlock.return_value = bytearray("session", "utf-8")
     mock_exec_json.return_value = []
-    mock_review.return_value = True
+    mock_authorize.return_value = {"approved": True, "password": bytearray("pw", "utf-8")}
     mock_compare.return_value = True
     
     payload = BatchComparePayload(
@@ -89,7 +96,7 @@ def test_compare_secrets_batch_v2(mock_review, mock_ask, mock_compare, mock_exec
         ]
     )
     
-    res = json.loads(compare_secrets_batch(payload))
+    res = compare_secrets_batch(payload)
     assert res["status"] == "success"
     assert res["results"][0]["field_a"] == "notes"
     assert res["results"][0]["field_b"] == "fields.HIDDEN"

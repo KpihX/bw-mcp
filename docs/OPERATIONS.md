@@ -1,28 +1,47 @@
 # BW-MCP Operations Runbook 🛠️
 
-This document covers the lifecycle management of the `bw-proxy` server and the recovery flows for the Write-Ahead Log (WAL).
+This document covers the lifecycle management of the `bw-proxy mcp` runtime and the recovery flows for the Write-Ahead Log (WAL).
 
-## 🔋 Server Lifecycle
+> Scope note:
+> - **Shell mode**: `bw-proxy mcp` can run as a local stdio server with PID-based lifecycle commands.
+> - **Docker mode**: the runtime is now ephemeral. The host wrapper launches a fresh container per invocation, so there is no background server to inspect, stop, or restart.
 
-The `bw-proxy` package includes a lifecycle controller to manage the background process.
+## 🔋 Server Lifecycle (Shell Mode)
+
+The `bw-proxy mcp` command group includes a lifecycle controller to manage the local MCP process.
 
 ### Check Status
 Verify if the server is running and which PID it owns.
 ```bash
-bw-proxy status
+bw-proxy mcp status
 ```
 
 ### Stop Server
 Gracefully terminate the server. This sends a `SIGTERM` to the process.
 ```bash
-bw-proxy stop
+bw-proxy mcp stop
 ```
 
 ### Restart Server
 Forcefully restart the server (useful after updates).
 ```bash
-bw-proxy restart
+bw-proxy mcp restart
 ```
+
+## 🐳 Docker Runtime Model
+
+Docker mode does **not** keep a resident MCP daemon alive.
+
+Each invocation:
+1. The host wrapper chooses a free loopback HITL port.
+2. It launches `docker run --rm ... bw-proxy <args>`.
+3. The container exits as soon as the command finishes.
+4. Persistent state survives through the named Docker volume mounted at `/data`.
+
+Implications:
+- No `docker exec` against a shared MCP container.
+- No fixed port `1138` reserved across the whole session.
+- No daemon lifecycle commands in Docker mode.
 
 ---
 
@@ -51,9 +70,9 @@ bw-proxy admin wal view
 
 ## 📂 Troubleshooting
 
-### Zenity Popup doesn't appear
-If you are running in a headless environment (SSH without X-forwarding), Zenity will fail.
-**Fix:** Ensure your `DISPLAY` variable is set or use a machine with a desktop environment.
+### Approval page does not open in Docker mode
+The wrapper opens the approval URL on the host once the container prints it.
+**Fix:** Verify that the host has a browser available and that loopback access to the chosen port is not blocked locally.
 
 ### "Item not found" during rollback
 This happens if you modified an item via another Bitwarden client (Mobile, Web) during the short window of an MCP transaction.

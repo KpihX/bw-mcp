@@ -13,6 +13,7 @@ from .ui import HITLManager
 from .wal import WALManager
 from .logger import TransactionLogger
 from .scrubber import deep_scrub_payload
+from .vault_runtime import VaultExecutionContext, ensure_fresh_sync, finalize_execution_context, open_vault_session
 
 class TransactionManager:
     """
@@ -24,8 +25,8 @@ class TransactionManager:
     def _perform_rollback(
         tx_id: str,
         rollback_stack: List[Dict[str, Any]],
-        master_password: bytearray,
-        session_key: bytearray
+        master_password_or_session_key: bytearray,
+        session_key: Optional[bytearray] = None,
     ) -> Dict[str, Any]:
         """
         Core LIFO rollback engine, shared by execute_batch and check_recovery.
@@ -39,6 +40,7 @@ class TransactionManager:
         This function DOES NOT touch the WAL. Callers decide whether to clear or
         preserve it based on the result, enabling safe non-destructive recovery.
         """
+        active_session_key = session_key or master_password_or_session_key
         # Materialise once to allow O(1)-index access if a crash occurs mid-loop
         rollback_lifo_list = list(reversed(rollback_stack))
         executed: List[str] = []
@@ -48,12 +50,12 @@ class TransactionManager:
                 args = rb_cmd.get("cmd", [])
                 if args and args[0] == "bw":
                     # Strip "bw" — SecureSubprocessWrapper.execute prepends it automatically
-                    SecureSubprocessWrapper.execute(args[1:], session_key)
+                    SecureSubprocessWrapper.execute(args[1:], active_session_key)
                     # Sanitize before storing — never log base64 payloads
                     executed.append(_sanitize_args_for_log(args))
                     
                     # 💡 Consume the executed command from WAL incrementally
-                    WALManager.pop_rollback_command(tx_id, master_password)
+                    WALManager.pop_rollback_command(tx_id, master_password_or_session_key)
                     
             return {"success": True, "executed": executed, "failed_cmd": None, "error": None}
         except Exception as e:
@@ -67,7 +69,10 @@ class TransactionManager:
             return {"success": False, "executed": executed, "failed_cmd": failed_cmd, "error": _safe_error_message(e)}
 
     @staticmethod
-    def check_recovery(master_password: bytearray, session_key: bytearray) -> Optional[str]:
+    def check_recovery(
+        master_password_or_session_key: bytearray,
+        session_key: Optional[bytearray] = None,
+    ) -> Optional[str]:
         """
         Checks the WAL for orphaned transactions resulting from a hard crash.
         If found, calls _perform_rollback to restore vault integrity.
@@ -77,14 +82,17 @@ class TransactionManager:
           logs ROLLBACK_FAILED, and returns a rich diagnostic message so the LLM can
           decide whether to retry or escalate to the user.
         """
+        wal_key = master_password_or_session_key
+        active_session_key = session_key or master_password_or_session_key
+
         if not WALManager.has_pending_transaction():
             return None
             
-        wal_data = WALManager.read_wal(master_password)
+        wal_data = WALManager.read_wal(wal_key)
         tx_id = wal_data.get("transaction_id", "UNKNOWN")
         rollback_stack = wal_data.get("rollback_commands", [])
         
-        result = TransactionManager._perform_rollback(tx_id, rollback_stack, master_password, session_key)
+        result = TransactionManager._perform_rollback(tx_id, rollback_stack, wal_key, active_session_key)
         
         # Synthetic Pydantic payload used to produce a log entry for this recovery event
         mock_payload = TransactionPayload(
@@ -132,7 +140,11 @@ class TransactionManager:
 
 
     @staticmethod
-    def execute_batch(payload_dict: Dict[str, Any]) -> str:
+    def execute_batch(
+        payload_dict: Dict[str, Any],
+        *,
+        execution_context: Optional[VaultExecutionContext] = None,
+    ) -> str:
         try:
             payload = TransactionPayload(**payload_dict)
         except Exception as e:
@@ -144,28 +156,64 @@ class TransactionManager:
         if not payload.operations:
             return "Error: No operations provided in the transaction payload."
             
-        master_password = None
-        session_key = None
+        owned_context = execution_context is None
+        context = execution_context or VaultExecutionContext(
+            title="Unlock Vault for Transaction Review",
+            raw_status={},
+            auth_state="locked",
+            unlock_deferred=True,
+        )
+        
         try:
-            try:
-                master_password = HITLManager.ask_master_password(title="Unlock Vault for Transaction Review")
-            except Exception as e:
-                return f"Transaction aborted: {_safe_error_message(e)}"
-                
-            try:
-                session_key = SecureSubprocessWrapper.unlock_vault(master_password)
-            except SecureBWError as e:
-                return f"Transaction failed during unlock: {str(e)}"
-                
-            try:
-                id_to_name = TransactionManager._resolve_action_names(payload.operations, session_key)
-            except SecureBWError as e:
-                # Let resolution errors explicitly inform the LLM instead of crashing
-                return f"Transaction failed during target resolution: {str(e)}"
-                
-            approved = HITLManager.review_transaction(payload, id_to_name=id_to_name)
-            if not approved:
+            # 1. Resolve target names for display (requires session if available)
+            id_to_name = {}
+            if context.session_key:
+                try:
+                    id_to_name = TransactionManager._resolve_action_names(payload.operations, context.session_key)
+                except Exception:
+                    pass # Fallback to UUIDs if name resolution fails initially
+            
+            # 2. Combined Review + Password Prompt
+            approval = HITLManager.authorize_transaction(
+                payload, 
+                id_to_name=id_to_name, 
+                needs_password=context.session_key is None
+            )
+            
+            if not approval.get("approved"):
                 return "Transaction aborted by the user."
+
+            # 3. Open session if needed
+            if context.session_key is None:
+                try:
+                    open_vault_session(
+                        context,
+                        title="Unlock Vault for Transaction Review",
+                        master_password=approval.get("password"),
+                    )
+                except Exception as e:
+                    return f"Transaction failed during unlock: {_safe_error_message(e)}"
+
+            # 4. Resolve names AGAIN if they weren't resolved before (now we have a session)
+            if not id_to_name:
+                 try:
+                    id_to_name = TransactionManager._resolve_action_names(payload.operations, context.session_key)
+                 except SecureBWError as e:
+                    return f"Transaction failed during target resolution: {str(e)}"
+
+            # 5. Ensure fresh sync
+            try:
+                ensure_fresh_sync(context)
+            except SecureBWError as e:
+                return f"Transaction failed during sync: {str(e)}"
+
+            session_key = context.session_key
+            if session_key is None:
+                return "Transaction failed: no active Bitwarden session is available."
+
+            recovery_msg = TransactionManager.check_recovery(session_key)
+            if recovery_msg:
+                return recovery_msg
                 
             results = []
             executed_ops: List[str] = []
@@ -179,7 +227,7 @@ class TransactionManager:
             logger_err = None
             
             # Initialize WAL
-            WALManager.write_wal(tx_id, rollback_stack, master_password)
+            WALManager.write_wal(tx_id, rollback_stack, session_key)
             
             try:
                 for op in payload.operations:
@@ -192,7 +240,7 @@ class TransactionManager:
                     if rollback_cmds:
                         # Append commands in reverse to maintain LIFO execution during rollback
                         rollback_stack.extend(reversed(rollback_cmds))
-                        WALManager.write_wal(tx_id, rollback_stack, master_password)
+                        WALManager.write_wal(tx_id, rollback_stack, session_key)
                         
                 WALManager.clear_wal()
                 return "Transaction completed successfully.\n" + "\n".join(results)
@@ -207,7 +255,7 @@ class TransactionManager:
                     
                 logger_status = TransactionStatus.ROLLBACK_TRIGGERED
                 # Delegate to the shared engine — no WAL mutation inside (except popping)
-                rb_result = TransactionManager._perform_rollback(tx_id, rollback_stack, master_password, session_key)
+                rb_result = TransactionManager._perform_rollback(tx_id, rollback_stack, session_key)
                 
                 executed_rolled_back_cmds = rb_result["executed"]
                 failed_rollback_cmd = rb_result["failed_cmd"]
@@ -248,14 +296,8 @@ class TransactionManager:
                     failed_rollback_cmd=failed_rollback_cmd
                 )
         finally:
-            if session_key is not None:
-                for i in range(len(session_key)):
-                    session_key[i] = 0
-                del session_key
-            if master_password is not None:
-                for i in range(len(master_password)):
-                    master_password[i] = 0
-                del master_password
+            if owned_context:
+                finalize_execution_context(context)
 
     @staticmethod
     def _resolve_action_names(operations: List[VaultTransactionAction], session_key: bytearray) -> Dict[str, str]:

@@ -7,6 +7,8 @@ from typing import List, Optional, Union
 from mcp.shared.exceptions import McpError
 from .config import load_config, PAYLOAD_TAG, BW_PASSWORD_ENV, BW_SESSION_ENV
 
+BW_CLI_TIMEOUT_SECONDS = int(os.environ.get("BW_CLI_TIMEOUT_SECONDS", "120"))
+
 # ─── Structural Command Redactor ────────────────────────────────────────────
 # Bitwarden CLI commands follow a strict grammar:
 #   bw <VERB> <OBJECT> [<ID>] [<PAYLOAD>] [--FLAGS...]
@@ -121,7 +123,8 @@ def _safe_error_message(e: Exception) -> str:
     # Internal Transparency: Log the real error to stderr so the human architect
     # can see it in terminal/container logs, but the AI only sees the redacted version.
     import traceback
-    print(f"\n[INTERNAL ERROR DEBUG]\n{traceback.format_exc()}", file=sys.stderr)
+    exc_trace = "".join(traceback.format_exception(type(e), e, e.__traceback__))
+    print(f"\n[INTERNAL ERROR DEBUG]\n{exc_trace}", file=sys.stderr)
     
     return f"{type(e).__name__}: An internal error occurred. Check server logs for details."
 
@@ -166,8 +169,10 @@ class SecureSubprocessWrapper:
                 ["bw", "login", email, "--passwordenv", BW_PASSWORD_ENV, "--raw"],
                 capture_output=True,
                 text=False,
-                env=env,
-                check=False
+                env={**os.environ, BW_PASSWORD_ENV: master_password.decode('utf-8'), "BW_NO_COLOR": "1", "BW_CHECK_FOR_UPDATES": "false"},
+                check=False,
+                timeout=BW_CLI_TIMEOUT_SECONDS,
+                stdin=subprocess.DEVNULL,
             )
             
             if result.returncode != 0:
@@ -177,11 +182,12 @@ class SecureSubprocessWrapper:
             while sk_bytes and sk_bytes[-1] in (b'\n'[0], b'\r'[0]):
                 sk_bytes.pop()
                 
-            # Force a sync after login
-            SecureSubprocessWrapper.execute(["sync"], sk_bytes)
-            
             return sk_bytes
             
+        except subprocess.TimeoutExpired as exc:
+            raise SecureBWError(
+                f"Bitwarden login timed out after {BW_CLI_TIMEOUT_SECONDS}s for {email}."
+            ) from exc
         finally:
             if BW_PASSWORD_ENV in env:
                 env[BW_PASSWORD_ENV] = "0" * 40
@@ -193,6 +199,13 @@ class SecureSubprocessWrapper:
         Logs out of the Bitwarden CLI, clearing local session data.
         """
         return SecureSubprocessWrapper.execute_raw(["logout"])
+
+    @staticmethod
+    def lock_vault() -> str:
+        """
+        Locks the Bitwarden vault while keeping the authenticated local session.
+        """
+        return SecureSubprocessWrapper.execute_raw(["lock"])
 
     @staticmethod
     def unlock_vault(master_password: bytearray) -> bytearray:
@@ -212,8 +225,10 @@ class SecureSubprocessWrapper:
                 ["bw", "unlock", "--passwordenv", BW_PASSWORD_ENV, "--raw"],
                 capture_output=True,
                 text=False,
-                env=env,
-                check=False
+                env={**os.environ, BW_PASSWORD_ENV: master_password.decode('utf-8'), "BW_NO_COLOR": "1", "BW_CHECK_FOR_UPDATES": "false"},
+                check=False,
+                timeout=BW_CLI_TIMEOUT_SECONDS,
+                stdin=subprocess.DEVNULL,
             )
             
             if result.returncode != 0:
@@ -223,12 +238,12 @@ class SecureSubprocessWrapper:
             while sk_bytes and sk_bytes[-1] in (b'\n'[0], b'\r'[0]):
                 sk_bytes.pop()
                 
-            # AUTO-SYNC: Immediately force a sync to ensure absolute data consistency
-            # before rendering the map or starting a transaction execution.
-            SecureSubprocessWrapper.execute(["sync"], sk_bytes)
-            
             return sk_bytes
             
+        except subprocess.TimeoutExpired as exc:
+            raise SecureBWError(
+                f"Bitwarden unlock timed out after {BW_CLI_TIMEOUT_SECONDS}s."
+            ) from exc
         finally:
             # Attempt best-effort memory scrubbing of the environment dictionary
             if BW_PASSWORD_ENV in env:
@@ -242,23 +257,38 @@ class SecureSubprocessWrapper:
         The session key is passed via environment variable and immediately scrubbed.
         """
         env = os.environ.copy()
-        env[BW_SESSION_ENV] = session_key.decode("utf-8")
+        env.update({
+            BW_SESSION_ENV: session_key.decode("utf-8"),
+            "BW_NO_COLOR": "1",
+            "BW_CHECK_FOR_UPDATES": "false",
+            "BW_SKIP_CONFIG_CHECK": "true",
+        })
 
         cmd = ["bw"] + args
 
         try:
             result = subprocess.run(
-                cmd, capture_output=True, text=True, env=env, check=False
+                cmd,
+                capture_output=True,
+                text=False,
+                env=env,
+                check=False,
+                timeout=BW_CLI_TIMEOUT_SECONDS,
+                stdin=subprocess.DEVNULL,
             )
 
             if result.returncode != 0:
-                err_clean = result.stderr.strip() if result.stderr else "Unknown error"
+                err_clean = result.stderr.decode("utf-8", errors="replace").strip() if result.stderr else "Unknown error"
                 # Note: internal debug logs might show this, but structural redactor 
                 # will still be used for the command part.
                 raise SecureBWError(f"Bitwarden command {_sanitize_args_for_log(args)} failed: {err_clean}")
 
-            return result.stdout.strip()
+            return result.stdout.decode("utf-8", errors="replace").strip()
 
+        except subprocess.TimeoutExpired as exc:
+            raise SecureBWError(
+                f"Bitwarden command {_sanitize_args_for_log(args)} timed out after {BW_CLI_TIMEOUT_SECONDS}s."
+            ) from exc
         finally:
             # Wipe environment variable and memory
             if BW_SESSION_ENV in env:
@@ -286,11 +316,21 @@ class SecureSubprocessWrapper:
     def execute_json(args: List[str], session_key: bytearray) -> dict | list:
         """
         Executes a bitwarden command and strictly parses the JSON response.
+        Attempts to scrape JSON from stdout to handle leading/trailing noise.
         """
         raw = SecureSubprocessWrapper.execute(args, session_key)
         try:
             return json.loads(raw)
         except json.JSONDecodeError:
+            # Fallback: Bitwarden sometimes prints "Checking for updates..." or other
+            # informational noise to stdout before the JSON. We attempt to extract
+            # the first valid JSON block.
+            match = re.search(r'([\[{].*[\]}])', raw, re.DOTALL)
+            if match:
+                try:
+                    return json.loads(match.group(1))
+                except json.JSONDecodeError:
+                    pass
             raise SecureBWError("Bitwarden CLI returned non-JSON data.")
 
     @staticmethod
@@ -303,12 +343,19 @@ class SecureSubprocessWrapper:
             result = subprocess.run(
                 cmd,
                 capture_output=True,
-                text=True,
-                check=False
+                text=False,
+                env={**os.environ, "BW_NO_COLOR": "1", "BW_CHECK_FOR_UPDATES": "false"},
+                check=False,
+                timeout=BW_CLI_TIMEOUT_SECONDS,
+                stdin=subprocess.DEVNULL,
             )
             if result.returncode != 0:
                 raise SecureBWError(f"Bitwarden command {_sanitize_args_for_log(args)} failed.")
-            return result.stdout.strip()
+            return result.stdout.decode("utf-8", errors="replace").strip()
+        except subprocess.TimeoutExpired as exc:
+            raise SecureBWError(
+                f"Bitwarden command {_sanitize_args_for_log(args)} timed out after {BW_CLI_TIMEOUT_SECONDS}s."
+            ) from exc
         except Exception as e:
             raise SecureBWError(f"Subprocess error: {str(e)}")
 

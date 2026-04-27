@@ -217,6 +217,7 @@ class BlindItem(BaseModel):
     id: Optional[str] = None
     organizationId: Optional[str] = None
     folderId: Optional[str] = None
+    collectionIds: Optional[List[str]] = None
     type: int
     name: str
     favorite: bool = False

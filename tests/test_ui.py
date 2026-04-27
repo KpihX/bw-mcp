@@ -1,91 +1,87 @@
-import pytest
-from bw_proxy.ui import HITLManager
+from unittest.mock import patch
+
 from bw_proxy.models import (
-    TransactionPayload, 
-    RenameItemAction, 
-    RestoreItemAction,
-    UpsertCustomFieldAction,
     DeleteFolderAction,
-    EditItemLoginAction
+    EditItemLoginAction,
+    RenameItemAction,
+    RestoreItemAction,
+    TransactionPayload,
+    UpsertCustomFieldAction,
 )
+from bw_proxy.ui import HITLManager
+
 
 def test_ui_format_operations():
-    """Verify that every polymorphic action renders beautifully without crashing."""
+    """Every polymorphic action should render into a stable human-readable summary."""
     op_rename = RenameItemAction(target_id="1", new_name="A")
     op_restore = RestoreItemAction(target_id="2")
     op_field = UpsertCustomFieldAction(target_id="3", name="API Key", value="sk_123", type=0)
     op_del = DeleteFolderAction(target_id="4")
     op_login = EditItemLoginAction(target_id="5", username="user@foo.com")
-    
+
     id_map = {"1": "Item A", "4": "Bad Folder"}
-    
+
     assert "✏️ RENAME ITEM 'Item A' (1) ->" in HITLManager._format_operation(op_rename, id_map)
     assert "♻️ RESTORE ITEM (2) -> From Trash" in HITLManager._format_operation(op_restore, id_map)
-    assert "🏷️ UPSERT FIELD (3) -> [Text] 'API Key' = 'sk_123'" in HITLManager._format_operation(op_field, id_map)
+    assert "🏷️ UPSERT FIELD (3) -> 'API Key' = 'sk_123'" in HITLManager._format_operation(op_field, id_map)
     assert "💥 DELETE FOLDER 'Bad Folder' (4)" in HITLManager._format_operation(op_del, id_map)
     assert "🔧 EDIT LOGIN (5) -> username='user@foo.com'" in HITLManager._format_operation(op_login, id_map)
 
-from unittest.mock import patch, MagicMock
 
-def test_ui_contains_destructive_alert():
-    """Ensure the RED ALERT logic triggers properly on delete actions."""
-    # delete_folder must be standalone — use a single-op batch
+def test_serialize_operation_details_includes_raw_json_and_resolved_ids():
+    op = RenameItemAction(target_id="item-1", new_name="Renamed")
+
+    details = HITLManager._serialize_operation_details(op, {"item-1": "Visible Name"})
+
+    assert details["action"] == "rename_item"
+    assert "Visible Name" in details["summary"]
+    assert '"target_id": "item-1"' in details["raw_json"]
+    assert details["resolved_refs"] == [
+        {"field": "target_id", "id": "item-1", "name": "Visible Name"}
+    ]
+
+
+@patch("bw_proxy.ui.WebHITLManager.request_approval")
+def test_review_transaction_uses_transparent_web_payload_without_second_password(mock_request):
     payload = TransactionPayload(
         rationale="Deleting a folder",
-        operations=[DeleteFolderAction(target_id="2")]
+        operations=[DeleteFolderAction(target_id="folder-1")],
     )
-    
-    with patch('bw_proxy.ui.subprocess.run') as mock_run:
-        mock_run.return_value = MagicMock(returncode=0)
-        
-        HITLManager.review_transaction(payload)
-        
-        # Verify it passed the warning dialog
-        call_args = mock_run.call_args[0][0]
-        assert "zenity" in call_args
-        assert "--question" in call_args
-        assert "--icon-name=dialog-warning" in call_args
-        assert any("DESTRUCTIVE OPERATIONS DETECTED" in arg for arg in call_args)
+    mock_request.return_value = {"approved": True}
 
-def test_ui_no_destructive_alert():
-    """Ensure safe operations only trigger a standard question."""
-    payload = TransactionPayload(
-        rationale="Safe renames",
-        operations=[RenameItemAction(target_id="1", new_name="Safe")]
-    )
-    
-    with patch('bw_proxy.ui.subprocess.run') as mock_run:
-        mock_run.return_value = MagicMock(returncode=0)
-        
-        HITLManager.review_transaction(payload)
-        
-        call_args = mock_run.call_args[0][0]
-        assert "zenity" in call_args
-        assert "--question" in call_args
-        assert "--icon-name=dialog-warning" not in call_args
+    approved = HITLManager.review_transaction(payload, {"folder-1": "Bad Folder"})
 
-def test_ui_escaping_special_characters():
-    """Verify that special characters are escaped to prevent Zenity/Pango markup crashes."""
-    payload = TransactionPayload(
-        rationale="Organizing Perso & Social",
-        operations=[RenameItemAction(target_id="1", new_name="A & B < C > D")]
-    )
-    
-    with patch('bw_proxy.ui.subprocess.run') as mock_run:
-        mock_run.return_value = MagicMock(returncode=0)
-        
-        HITLManager.review_transaction(payload, id_to_name={"1": "Me & You"})
-        
-        call_args = mock_run.call_args[0][0]
-        text_arg = ""
-        for i, arg in enumerate(call_args):
-            if arg == "--text":
-                text_arg = call_args[i+1]
-                break
-        
-        # Check rationale
-        assert "Organizing Perso &amp; Social" in text_arg
-        # Check item name (resolved via id_to_name)
-        assert "'Me &amp; You' (1)" in text_arg
-        # Check new name
-        assert "A &amp; B &lt; C &gt; D" in text_arg
+    assert approved is True
+    web_data = mock_request.call_args.args[0]
+    assert web_data["type"] == "transaction"
+    assert web_data["flow"] == "review"
+    assert web_data["has_destructive"] is True
+    assert "Nothing is executed while you inspect this page." in web_data["review_notice"]
+    assert web_data["operations_details"][0]["resolved_refs"] == [
+        {"field": "target_id", "id": "folder-1", "name": "Bad Folder"}
+    ]
+    assert '"target_id": "folder-1"' in web_data["operations_details"][0]["raw_json"]
+
+
+@patch("bw_proxy.ui.WebHITLManager.request_approval")
+def test_ask_input_returns_browser_text_value(mock_request):
+    mock_request.return_value = {"approved": True, "input_text": "https://vault.example.com"}
+
+    value = HITLManager.ask_input("Bitwarden Server URL", "Setup URL")
+
+    assert value == "https://vault.example.com"
+    web_data = mock_request.call_args.args[0]
+    assert web_data["flow"] == "prompt"
+    assert web_data["input_kind"] == "text"
+
+
+@patch("bw_proxy.ui.WebHITLManager.request_approval")
+def test_ask_master_password_uses_prompt_only_flow(mock_request):
+    mock_request.return_value = {"approved": True, "password": bytearray(b"pw")}
+
+    password = HITLManager.ask_master_password("Unlock Vault")
+
+    assert password == bytearray(b"pw")
+    web_data = mock_request.call_args.args[0]
+    assert web_data["flow"] == "prompt"
+    assert web_data["input_kind"] == "password"

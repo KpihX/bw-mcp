@@ -2,8 +2,57 @@ import os
 import yaml
 from pathlib import Path
 from functools import lru_cache
+from typing import Any
 
-CONFIG_PATH = Path(__file__).resolve().parent / "config.yaml"
+BUNDLED_CONFIG_PATH = Path(__file__).resolve().parent / "config.yaml"
+WORKSPACE_CONFIG_PATH = Path("/workspace/src/bw_proxy/config.yaml")
+
+
+def _resolve_config_path() -> Path:
+    """
+    Resolve the mutable config target.
+
+    Priority:
+    1. Explicit env override.
+    2. Mounted workspace config in Docker dev mode.
+    3. Persistent runtime config in BW_PROXY_DATA.
+    4. Bundled source config as a host-mode fallback.
+    """
+    explicit = os.environ.get("BW_PROXY_CONFIG_PATH")
+    if explicit:
+        return Path(os.path.expanduser(explicit))
+
+    if WORKSPACE_CONFIG_PATH.exists() and os.access(WORKSPACE_CONFIG_PATH, os.W_OK):
+        return WORKSPACE_CONFIG_PATH
+
+    runtime_data_dir = os.environ.get("BW_PROXY_DATA")
+    if runtime_data_dir:
+        return Path(os.path.expanduser(runtime_data_dir)) / "config.yaml"
+
+    return BUNDLED_CONFIG_PATH
+
+
+CONFIG_PATH = _resolve_config_path()
+
+
+def _read_yaml_mapping(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        try:
+            data = yaml.safe_load(f) or {}
+        except yaml.YAMLError:
+            return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _load_base_config(config_path: Path) -> dict:
+    path = Path(config_path)
+    if path.exists():
+        return _read_yaml_mapping(path)
+    if path != BUNDLED_CONFIG_PATH:
+        return _read_yaml_mapping(BUNDLED_CONFIG_PATH)
+    return {}
 
 def _load_dotenv():
     """
@@ -34,14 +83,7 @@ def load_config(config_path=CONFIG_PATH, **overrides) -> dict:
     Load the strict proxy configuration with overrides support.
     Cached to ensure we only hit the disk once per instance.
     """
-    if not config_path.exists():
-        return {}
-
-    with open(config_path, 'r') as f:
-        try:
-            config = yaml.safe_load(f)
-        except yaml.YAMLError:
-            return {}
+    config = _load_base_config(Path(config_path))
             
     # Simple recursive dict update for overrides
     def deep_update(d, u):
@@ -63,15 +105,8 @@ def update_config(new_values: dict, config_path=CONFIG_PATH):
     Uses a clean load (no cache) to ensure we don't overwrite concurrent manual edits
     with old cached state.
     """
-    # 1. Load current raw data from disk
-    if config_path.exists():
-        with open(config_path, 'r') as f:
-            try:
-                data = yaml.safe_load(f) or {}
-            except yaml.YAMLError:
-                data = {}
-    else:
-        data = {}
+    config_path = Path(config_path)
+    data = _load_base_config(config_path)
 
     # 2. Recursive update helper
     def deep_update(d, u):
@@ -86,11 +121,62 @@ def update_config(new_values: dict, config_path=CONFIG_PATH):
     updated_data = deep_update(data, new_values)
 
     # 4. Save back to disk
-    with open(config_path, 'w') as f:
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(config_path, 'w', encoding="utf-8") as f:
         yaml.dump(updated_data, f, default_flow_style=False, sort_keys=False)
 
     # 5. VERY IMPORTANT: Clear the lru_cache so the next load_config() sees the change
     load_config.cache_clear()
+
+
+def write_config_text(raw_text: str, config_path=CONFIG_PATH) -> dict:
+    """Validate and persist the full YAML config text."""
+    config_path = Path(config_path)
+    parsed = yaml.safe_load(raw_text) or {}
+    if not isinstance(parsed, dict):
+        raise ValueError("Configuration root must be a YAML mapping.")
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(config_path, "w", encoding="utf-8") as f:
+        f.write(raw_text)
+    load_config.cache_clear()
+    return parsed
+
+
+def dump_config_text(config_path=CONFIG_PATH) -> str:
+    """Return the current raw config file text."""
+    config_path = Path(config_path)
+    if config_path.exists():
+        return config_path.read_text(encoding="utf-8")
+    if config_path != BUNDLED_CONFIG_PATH and BUNDLED_CONFIG_PATH.exists():
+        return BUNDLED_CONFIG_PATH.read_text(encoding="utf-8")
+    return ""
+
+
+def get_config_value(path: str, config_path=CONFIG_PATH) -> Any:
+    """Resolve a dotted config path from the current config mapping."""
+    data = load_config(config_path=config_path)
+    current: Any = data
+    for part in path.split("."):
+        if not isinstance(current, dict) or part not in current:
+            raise KeyError(path)
+        current = current[part]
+    return current
+
+
+def set_config_value(path: str, value: Any, config_path=CONFIG_PATH) -> Any:
+    """Set one dotted config path and persist the YAML file."""
+    parts = path.split(".")
+    if not parts:
+        raise ValueError("Configuration path cannot be empty.")
+    nested: dict[str, Any] = {}
+    cursor = nested
+    for part in parts[:-1]:
+        next_cursor: dict[str, Any] = {}
+        cursor[part] = next_cursor
+        cursor = next_cursor
+    cursor[parts[-1]] = value
+    update_config(nested, config_path=config_path)
+    return get_config_value(path, config_path=config_path)
 
 # -----------------
 # GLOBAL TYPED CONSTANTS
@@ -155,8 +241,15 @@ MAX_AUDIT_SCAN_CEILING: int = _audit_config.get("max_scan_ceiling", 1000)
 # HITL CONSTANTS
 # -----------------
 _hitl_config = _config_cache.get("hitl", {})
+_docker_unlock_config = _config_cache.get("docker_unlock", {})
 
 HITL_HOST: str = os.environ.get("HITL_HOST", _hitl_config.get("host", "127.0.0.1"))
 HITL_PORT = int(os.environ.get("HITL_PORT", 1138))
 HITL_AUTO_OPEN = os.environ.get("HITL_AUTO_OPEN", "true").lower() == "true"
 HITL_USE_HTTPS = os.environ.get("HITL_USE_HTTPS", "true").lower() == "true"
+HITL_VALIDATION_MODE: str = os.environ.get(
+    "HITL_VALIDATION_MODE",
+    _hitl_config.get("validation_mode", "browser"),
+).lower()
+
+DOCKER_UNLOCK_MAX_DURATION_SECONDS: int = int(_docker_unlock_config.get("max_duration_seconds", 300))

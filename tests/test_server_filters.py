@@ -6,10 +6,14 @@ from unittest.mock import patch, MagicMock
 # The function is decorated, so we need to access its __wrapped__ attribute or test the module logic
 import bw_proxy.server as server
 
+@patch('bw_proxy.vault_runtime.load_bw_status', return_value={"status": "locked", "serverUrl": "https://vault.example.com", "userEmail": "agent@example.com"})
+@patch('bw_proxy.vault_runtime.validate_authenticated_context', return_value=None)
 @patch('bw_proxy.logic.HITLManager.ask_master_password')
 @patch('bw_proxy.logic.SecureSubprocessWrapper.unlock_vault')
+@patch('bw_proxy.logic.SecureSubprocessWrapper.execute', return_value="")
 @patch('bw_proxy.logic.SecureSubprocessWrapper.execute_json')
-def test_get_vault_map_split_search(mock_exec_json, mock_unlock, mock_ask):
+@patch('bw_proxy.logic.TransactionManager.check_recovery', return_value=None)
+def test_get_vault_map_split_search(mock_recovery, mock_exec_json, mock_exec, mock_unlock, mock_ask, mock_validate, mock_status):
     """Ensure search_items and search_folders route correctly to their respective base args."""
     mock_ask.return_value = bytearray("pw", "utf-8")
     mock_unlock.return_value = bytearray("session", "utf-8")
@@ -19,17 +23,18 @@ def test_get_vault_map_split_search(mock_exec_json, mock_unlock, mock_ask):
     
     calls = mock_exec_json.call_args_list
     assert len(calls) == 6 # Active Items, Active Folders, Trash Items, Trash Folders, Organizations, Collections
-    
-    # Check Active Items call
+
     assert calls[0][0][0] == ["list", "items", "--search", "Lokad"]
-    
-    # Check Active Folders call
     assert calls[1][0][0] == ["list", "folders", "--search", "Dev"]
 
+@patch('bw_proxy.vault_runtime.load_bw_status', return_value={"status": "locked", "serverUrl": "https://vault.example.com", "userEmail": "agent@example.com"})
+@patch('bw_proxy.vault_runtime.validate_authenticated_context', return_value=None)
 @patch('bw_proxy.logic.HITLManager.ask_master_password')
 @patch('bw_proxy.logic.SecureSubprocessWrapper.unlock_vault')
+@patch('bw_proxy.logic.SecureSubprocessWrapper.execute', return_value="")
 @patch('bw_proxy.logic.SecureSubprocessWrapper.execute_json')
-def test_get_vault_map_trash_state_none(mock_exec_json, mock_unlock, mock_ask):
+@patch('bw_proxy.logic.TransactionManager.check_recovery', return_value=None)
+def test_get_vault_map_trash_state_none(mock_recovery, mock_exec_json, mock_exec, mock_unlock, mock_ask, mock_validate, mock_status):
     """Ensure trash_state='none' skips fetching the trash."""
     mock_ask.return_value = bytearray("pw", "utf-8")
     mock_unlock.return_value = bytearray("session", "utf-8")
@@ -45,10 +50,14 @@ def test_get_vault_map_trash_state_none(mock_exec_json, mock_unlock, mock_ask):
     assert calls[1][0][0] == ["list", "folders"]
     assert calls[2][0][0] == ["list", "organizations"]
     
+@patch('bw_proxy.vault_runtime.load_bw_status', return_value={"status": "locked", "serverUrl": "https://vault.example.com", "userEmail": "agent@example.com"})
+@patch('bw_proxy.vault_runtime.validate_authenticated_context', return_value=None)
 @patch('bw_proxy.logic.HITLManager.ask_master_password')
 @patch('bw_proxy.logic.SecureSubprocessWrapper.unlock_vault')
+@patch('bw_proxy.logic.SecureSubprocessWrapper.execute', return_value="")
 @patch('bw_proxy.logic.SecureSubprocessWrapper.execute_json')
-def test_get_vault_map_trash_state_only(mock_exec_json, mock_unlock, mock_ask):
+@patch('bw_proxy.logic.TransactionManager.check_recovery', return_value=None)
+def test_get_vault_map_trash_state_only(mock_recovery, mock_exec_json, mock_exec, mock_unlock, mock_ask, mock_validate, mock_status):
     """Ensure trash_state='only' skips fetching active items to speed up the proxy."""
     mock_ask.return_value = bytearray("pw", "utf-8")
     mock_unlock.return_value = bytearray("session", "utf-8")
@@ -63,12 +72,16 @@ def test_get_vault_map_trash_state_only(mock_exec_json, mock_unlock, mock_ask):
     assert calls[0][0][0] == ["list", "items", "--trash"]
     assert calls[1][0][0] == ["list", "folders", "--trash"]
     assert calls[2][0][0] == ["list", "organizations"]
-    assert calls[3][0][0] == ["list", "org-collections"]
+    assert calls[3][0][0] == ["list", "collections"]
 
+@patch('bw_proxy.vault_runtime.load_bw_status', return_value={"status": "locked", "serverUrl": "https://vault.example.com", "userEmail": "agent@example.com"})
+@patch('bw_proxy.vault_runtime.validate_authenticated_context', return_value=None)
 @patch('bw_proxy.logic.HITLManager.ask_master_password')
 @patch('bw_proxy.logic.SecureSubprocessWrapper.unlock_vault')
+@patch('bw_proxy.logic.SecureSubprocessWrapper.execute', return_value="")
 @patch('bw_proxy.logic.SecureSubprocessWrapper.execute_json')
-def test_get_vault_map_folder_id(mock_exec_json, mock_unlock, mock_ask):
+@patch('bw_proxy.logic.TransactionManager.check_recovery', return_value=None)
+def test_get_vault_map_folder_id(mock_recovery, mock_exec_json, mock_exec, mock_unlock, mock_ask, mock_validate, mock_status):
     """Ensure folder_id is added to the args array."""
     mock_ask.return_value = bytearray("pw", "utf-8")
     mock_unlock.return_value = bytearray("session", "utf-8")
@@ -79,5 +92,34 @@ def test_get_vault_map_folder_id(mock_exec_json, mock_unlock, mock_ask):
     calls = mock_exec_json.call_args_list
     # Active Items should have the flag
     assert calls[0][0][0] == ["list", "items", "--folderid", "my-folder"]
-    # Active Folders should NOT have the flag (bw list folders doesn't take folderid)
-    assert calls[1][0][0] == ["list", "folders"]
+    # Folder-only metadata is skipped for item-focused filters.
+    assert all(call[0][0][0:2] != ["list", "folders"] for call in calls[:2])
+
+
+@patch('bw_proxy.vault_runtime.load_bw_status', return_value={"status": "locked", "serverUrl": "https://vault.example.com", "userEmail": "agent@example.com"})
+@patch('bw_proxy.vault_runtime.validate_authenticated_context', return_value=None)
+@patch('bw_proxy.logic.HITLManager.ask_master_password')
+@patch('bw_proxy.logic.SecureSubprocessWrapper.unlock_vault')
+@patch('bw_proxy.logic.SecureSubprocessWrapper.execute', return_value="")
+@patch('bw_proxy.logic.SecureSubprocessWrapper.execute_json')
+@patch('bw_proxy.logic.TransactionManager.check_recovery', return_value=None)
+def test_get_vault_map_folder_only_search_skips_item_queries_and_dedupes_trash(mock_recovery, mock_exec_json, mock_exec, mock_unlock, mock_ask, mock_validate, mock_status):
+    """Folder-only searches should not fetch every item, and trash duplicates must not leak into active folders."""
+    mock_ask.return_value = bytearray("pw", "utf-8")
+    mock_unlock.return_value = bytearray("session", "utf-8")
+    duplicated_folder = {"id": "folder-1", "name": "Finance"}
+    mock_exec_json.side_effect = [
+        [duplicated_folder],          # active folders
+        [duplicated_folder],          # trash folders
+        [],                           # orgs
+        [],                           # collections
+    ]
+
+    result = server.get_vault_map(search_folders="fin")
+
+    assert mock_exec_json.call_count == 4
+    assert mock_exec_json.call_args_list[0][0][0] == ["list", "folders", "--search", "fin"]
+    assert mock_exec_json.call_args_list[1][0][0] == ["list", "folders", "--search", "fin", "--trash"]
+    assert result["data"]["items"] == []
+    assert result["data"]["folders"] == []
+    assert result["data"]["trash_folders"] == [{"id": "folder-1", "name": "Finance"}]

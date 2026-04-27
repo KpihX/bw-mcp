@@ -169,6 +169,54 @@ def test_transaction_auto_recovery_execution(mock_log, mock_exec, tmp_path):
         assert mock_log.call_args.kwargs["status"] == "CRASH_RECOVERED_ON_BOOT"
 
 
+@patch('bw_proxy.transaction.WALManager.pop_rollback_command')
+@patch('bw_proxy.transaction.SecureSubprocessWrapper.execute')
+def test_perform_rollback_pops_wal_incrementally(mock_exec, mock_pop):
+    """Each successful compensating action must consume one WAL entry immediately."""
+    rollback_stack = [
+        {"cmd": ["bw", "edit", "item", "id-a", "{}"]},
+        {"cmd": ["bw", "restore", "item", "id-b"]},
+    ]
+
+    result = TransactionManager._perform_rollback(
+        "tx-rollback",
+        rollback_stack,
+        TEST_MASTER_PASSWORD,
+        bytearray("session", "utf-8"),
+    )
+
+    assert result["success"] is True
+    assert mock_exec.call_count == 2
+    assert mock_pop.call_count == 2
+
+
+@patch('bw_proxy.transaction.SecureSubprocessWrapper.execute')
+@patch('bw_proxy.transaction.TransactionLogger.log_transaction')
+def test_check_recovery_preserves_wal_when_rollback_fails(mock_log, mock_exec, tmp_path):
+    """A failed recovery rollback must keep the WAL on disk for the next retry/manual fix."""
+    wal_file = str(tmp_path / "pending_transaction.wal")
+
+    with patch('bw_proxy.wal.WAL_FILE', wal_file), \
+         patch('bw_proxy.wal.WAL_DIR', str(tmp_path)):
+        WALManager.write_wal("tx-preserve", [
+            {"cmd": ["bw", "edit", "item", "id-123", "{}"]},
+            {"cmd": ["bw", "restore", "folder", "f-999"]},
+        ], TEST_MASTER_PASSWORD)
+
+        def fail_second(args, session_key):
+            if args[:3] == ["edit", "item", "id-123"]:
+                raise SecureBWError("rollback command failed")
+            return ""
+
+        mock_exec.side_effect = fail_second
+
+        msg = TransactionManager.check_recovery(TEST_MASTER_PASSWORD, bytearray("session", "utf-8"))
+
+        assert "rollback FAILED" in msg
+        assert WALManager.has_pending_transaction() is True
+        assert mock_log.call_args.kwargs["status"] == "ROLLBACK_FAILED"
+
+
 def test_safe_error_message_securebwerror():
     """SecureBWError messages pass through (already sanitized)."""
     err = SecureBWError("Bitwarden command edit item [PAYLOAD] failed.")

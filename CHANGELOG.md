@@ -2,12 +2,115 @@
 
 All notable changes to this project, from its inception to the current secure state.
 
+## [v3.2.0] - 2026-04-27: Unlock Lease, Policy-Driven `do`, and WAL Session-Key Alignment
+### 🔐 Auth & Docker Runtime
+- **Natural Bitwarden lifecycle enforced**: `admin login` now establishes the authenticated locked state only; `do` commands fail fast when Bitwarden is logged out instead of trying to log in implicitly.
+- **Docker unlock lease**: added `bw-proxy admin unlock` and `bw-proxy admin lock` for short-lived Docker-only session reuse. The lease is encrypted at rest in persistent Docker data and expires after the YAML-configured fixed duration.
+- **Lease-aware `do` execution**: vault commands now reuse a valid unlock lease without prompting for the Master Password again, while still relocking after per-command unlocks when no lease is active.
+
+### 🧰 `do` Pipeline Refactor
+- **Policy-based decorators**: replaced the monolithic vault wrapper with explicit per-command policy metadata for authenticated access, pre-sync, autosave eligibility, and unlock-lease support.
+- **Selective pre-sync**: only freshness-sensitive commands now auto-sync before execution (`get_vault_map`, transaction/refactor flows, and duplicate/secret audits). `do sync` no longer double-syncs through a generic wrapper.
+- **Selective autosave**: temp autosave now applies only to large structured `do` outputs such as `get-vault-map` and audit scans. Small acknowledgements like `sync` no longer emit temp artifacts by default.
+- **Pure RPC payload discipline preserved**: the generated `do` CLI still exposes only JSON payload input plus meta-options, while now carrying the policy metadata through the central command registry.
+
+### 🧾 HITL & WAL
+- **Combined validation flow**: browser/TUI validation now supports password+review in one `prompt_review` flow, removing the useless intermediate “continue” approval between unlock and final action review.
+- **Transaction auth centralization**: transaction/refactor commands now use the same runtime/auth policy layer as the rest of `do`, instead of a disconnected login/unlock path.
+- **WAL keyed by session secret**: WAL encryption/recovery is now aligned with the active Bitwarden session secret, allowing Docker unlock leases to remain compatible with ACID transaction recovery without storing the Master Password.
+### 🛠️ Subprocess & CLI Hardening
+- **CLI noise suppression**: added `BW_NO_COLOR`, `BW_CHECK_FOR_UPDATES`, and `BW_SKIP_CONFIG_CHECK` to the subprocess environment to minimize informational stdout pollution.
+- **Regex JSON scraping**: implemented a robust fallback in `execute_json` that scrapes valid JSON blocks from stdout using regex, allowing the proxy to recover structured data even when the Bitwarden CLI emits unexpected trailing or leading noise.
+- **Traceback logging**: internal subprocess errors now log full tracebacks to `stderr` (visible to the architect) while returning sanitized, redacted messages to the AI.
+
+### 🧪 Verification
+- **Coverage expansion**: added regression coverage for Docker unlock/lock behavior, command policy metadata, and selective autosave behavior.
+- **Full suite green**: revalidated the full project at **142/142 tests passing**.
+
+## [v3.1.0] - 2026-04-26: CLI Contract Homogenization & Structured Logic Payloads
+### 🧰 CLI & Operator UX
+- **Structured logic payloads**: CLI-facing functions in `logic.py` now return JSON-compatible dictionaries consistently instead of a mix of raw strings, JSON strings, and structured payloads.
+- **Admin control plane cleanup**: `login`, `logout`, and the new `admin status` now live entirely under `bw-proxy admin`, replacing the earlier `admin setup`-style discovery surface.
+- **Config symmetry**: the admin config surface is now exactly `config get`, `config set`, and `config edit`; `get`/`set` are parameter-specific while `edit` opens the full YAML for guided human editing.
+- **Browser config editor**: `bw-proxy admin config edit` now opens the entire `config.yaml` in a browser-based editor, validates the YAML before write, and only persists valid content after explicit apply.
+- **Option-scope discipline**: `--format`, `--output-file`, and `--examples` are now reserved for `bw-proxy do`, keeping `admin` and `mcp` short and predictable.
+- **Centralized validation transport**: HITL validation now goes through one shared browser/terminal pipeline with a configurable `hitl.validation_mode` (`browser` by default, `terminal` optional), and the terminal renderer now reuses the same review payload content as the browser UI.
+
+### 📚 Help & Metadata
+- **Examples coverage hardened**: every `bw-proxy do` action now exposes usable examples through the command registry and `-e/--examples`.
+- **Docstring de-duplication**: dynamic `do --help` pages now avoid repeating the summary paragraph before the long-form body.
+
+## [v3.0.0] - 2026-04-26: CLI Surface Consolidation & Pytest-Only Test Tree
+### 💥 Breaking CLI Change
+- **MCP lifecycle commands moved under `bw-proxy mcp`**: `serve`, `status`, `stop`, and `restart` are no longer root commands. The CLI now cleanly separates runtime control (`bw-proxy mcp ...`) from operator workflows (`bw-proxy do ...`) and administrative workflows (`bw-proxy admin ...`).
+- **Default stdio entry preserved**: invoking `bw-proxy` with no arguments still starts the MCP server, but now routes internally to `bw-proxy mcp serve`.
+
+### 🧪 Test System
+- **Pytest-only `tests/` tree**: the former `tests/audit_cli_rpc.py` shell script is now a proper pytest suite, so every maintained test entrypoint uses the same runner, assertion style, and reporting model.
+- **Benchmark moved out of test collection**: the performance audit is now `scripts/perf_audit.py`, keeping `tests/` focused on correctness instead of ad hoc benchmarking.
+- **Unified Makefile test surface**: `make test`, `make test-cli`, `make test-core`, and `make check` now all route through pytest consistently.
+
+### 🧹 Hygiene
+- **Scratch cleanup policy**: transient `scratch/live_*` artifacts and local scratch probes are now ignored and can be removed through `make clean-scratch` so they stop polluting commits.
+
+## [v2.6.4] - 2026-04-25: Typed CLI Bridge Validation & Rich Schema Help
+### 🧰 CLI & Operator UX
+- **Dynamic typed CLI bridge**: The `bw-proxy do` command surface now derives subcommand signatures directly from `logic.py`, preserving command/parameter parity while exposing named flags alongside payload-based invocation.
+- **Pydantic V2 parameter validation**: The generated CLI wrappers now validate typed operands through `TypeAdapter(...)` before dispatch, producing immediate Rich validation panels for bad inputs such as malformed booleans or integers.
+- **Rich schema reference output**: `bw-proxy do help` now renders command schemas through `rich.json.JSON`, making complex payload structures significantly easier to scan than plain text dumps.
+- **Duplicate flag hardening**: The bridge now de-duplicates generated option aliases so parameters like `--folder-id` are registered exactly once and no longer trigger Click warnings.
+
+### 🧪 Verification
+- **Full suite green**: Revalidated the full project at **110/110 tests passing**.
+
+## [v2.6.1] - 2026-04-25: Vault Map Determinism & CLI Ergonomics
+### 🛡️ Core Robustness
+- **Deterministic `get_vault_map` filtering**: The proxy now applies a defensive post-filter layer on top of Bitwarden CLI results so folder-only searches no longer dump the entire item inventory, and explicit item filters remain scoped predictably.
+- **Active/Trash de-duplication**: If the Bitwarden CLI surfaces the same entity in both active and trash list calls, BW-Proxy now prefers the explicit trash result and removes the duplicate from the active side.
+- **Safer read-path scope**: Filtered `get_vault_map` calls now skip irrelevant list queries instead of fetching unrelated vault sections and relying on the caller to ignore them.
+
+### 🧰 CLI & Operator UX
+- **Uniform `do` option surface**: `bw-proxy do` commands now expose consistent named flags for the main operands (`--email`, `--type`, `--file`, `--rationale`, `--operations-json`, `--tx-id`, `--n`, etc.) while preserving positional compatibility for fast shell usage.
+- **`inspect-log -n/--n` parity**: The `do inspect-log` command now supports the short `-n` alias in addition to `--n`.
+- **Automatic temp artifacts**: When `-o/--output-file` is omitted on `bw-proxy do`, the command still prints to stdout and now also writes an operator artifact to the system temp directory under `bw_proxy/`, using a timestamped command-aware filename.
+
+### 🧪 Verification
+- **Expanded regression coverage**: Added tests for vault-map scope/dedup behavior, autosave temp artifacts, option aliases, and the hardened login/server-alignment flow.
+
+## [v2.6.0] - 2026-04-25: CLI Export, JSON Import & Rollback/SSL Hardening
+### 🧰 CLI & Automation
+- **`--output-file` for `bw-proxy do`**: Added `-o/--output-file` to every `do` subcommand so JSON/text responses can be written directly to disk instead of stdout.
+- **JSON Batch Import**: Added `bw-proxy do import-json <file>` to feed transactions from disk through the standard ACID engine. The importer accepts either:
+  - a full payload object with `rationale` + `operations`
+  - an object with `items`
+  - a raw JSON array of operation objects or create-item specs
+
+### 🔒 HTTPS & Recovery
+- **SAN-Aware Self-Signed Certificates**: Local HTTPS certificates now include `subjectAltName` entries for `localhost`, `127.0.0.1`, and the effective host when relevant, improving browser acceptance of the local approval page.
+- **Rollback Failure Coverage**: Expanded rollback tests to verify incremental WAL consumption, WAL preservation on failed recovery, and fatal error surfacing when the rollback phase itself crashes.
+
+### 🧪 Verification
+- **Docker Concurrency Soak Coverage**: Added concurrency-oriented shim tests ensuring parallel invocations use distinct host ports and do not duplicate host browser openings.
+- **Test Suite Growth**: The project now collects **103 tests**.
+
+## [v2.5.0] - 2026-04-25: Ephemeral Docker Runtime & Dynamic HITL Ports
+### 🐳 Docker Runtime
+- **Ephemeral-by-Design Container Model**: Removed the long-lived Docker `serve` daemon pattern. The host wrapper now launches a fresh `docker run --rm` container for each `bw-proxy` invocation, matching the real MCP lifecycle of AI clients.
+- **Dynamic HITL Port Allocation**: Docker mode now picks a free loopback host port per invocation and injects it into the container as `HITL_PORT`, eliminating the chronic `1138` contention between background MCP sessions and one-shot admin/do flows.
+- **Host-Side Browser Opening**: Disabled in-container auto-open for Docker mode and moved URL opening fully to the host shim, ensuring the approval page opens on the user machine instead of inside the container namespace.
+- **Persistent Docker Config Sync**: `make docker-install` now syncs non-secret runtime configuration to `~/.bw/proxy/docker.env` so the global wrapper remains self-sufficient outside the repo checkout.
+
+### 🛠️ Tooling & Reliability
+- **No Daemon Container Left Behind**: `make docker-up` now prepares the runtime instead of spawning a resident MCP container. `docker-down` and log targets became explicit no-op helpers because there is no longer a shared background container to stop or tail.
+- **Socket Reuse Hardening**: Promoted `allow_reuse_address = True` to the HTTP server class, fixing the previous ineffective per-instance assignment.
+- **Test Coverage Expansion**: Added dedicated tests for the Docker shim contract (default `serve`, ephemeral `docker run`, dynamic port wiring, and daemon-command rejection).
+
 ## [v2.4.0] - 2026-04-24: Sovereign SSL & Two-Step HITL
 ### 🔒 Security
 - **Local HTTPS Support**: HITL server now uses ephemeral self-signed SSL certificates (OpenSSL) to protect local loopback traffic and Master Password transmission.
 - **Two-Step Approval Flow**: Introduced a "Lock Screen" in the Web UI. Transaction details are now strictly hidden until the Master Password is provided, preventing accidental exposure of proposed actions.
 - **Enforced Authentication**: Password-first flow is now mandatory for all vault reviews and duplicate scans.
-- **100% Agnostic Host Link**: Replaced Linux-oriented Bash shims with a Python-based intelligent switcher. The `bw-proxy` binary now works cross-platform (Windows/Mac/Linux) by detecting a local `.docker_mode` marker.
+- **100% Agnostic Host Link**: Replaced Linux-oriented Bash shims with a Python-based intelligent switcher. The `bw-proxy` binary now works cross-platform (Windows/Mac/Linux) by spawning ephemeral runtime containers on demand.
 
 ## [v2.3.0] - 2026-04-24: Agnostic Web Approval UI & Sovereign Browser HITL
 ### 🆕 Features

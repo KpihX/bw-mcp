@@ -743,6 +743,55 @@ To inspect a stranded WAL, use the CLI: `bw-proxy admin wal view` (prompts for M
 
 ---
 
+## 🕹️ RPC 2.0 Command Reference
+
+<!-- API_START -->
+
+| Command | Description | Typed JSON Schema |
+| :--- | :--- | :--- |
+| `do compare-secrets-batch` | BLIND AUDIT: Safely compares secret fields (passwords, TOTPs, notes, custom fields) between vault items without EVER exposing the actual values. Returns MATCH or MISMATCH verdicts for each comparison pair. | <pre>{
+  "payload": "bw_proxy.models.BatchComparePayload"
+}</pre> |
+| `do fetch-template` | Fetches the sanitized JSON schema template for a Bitwarden entity type. Useful for understanding the valid fields before creating or editing items. Secret fields are proactively redacted in the output. | <pre>{
+  "template_type": "str"
+}</pre> |
+| `do find-all-vault-duplicates` | Deep audit: scans the ENTIRE vault for ANY items sharing identical secret values. Detects global password reuse, duplicate notes, and identical custom field values. This is a computationally expensive operation — use scan_limit to control scope. | <pre>{
+  "payload": "bw_proxy.models.FindAllDuplicatesPayload"
+}</pre> |
+| `do find-duplicates-batch` | Finds duplicates for multiple target items in a single vault sweep. More efficient than calling find-item-duplicates repeatedly — uses one Master Password prompt and one sync for all targets. | <pre>{
+  "payload": "bw_proxy.models.FindDuplicatesBatchPayload"
+}</pre> |
+| `do find-item-duplicates` | Finds vault items that share the same secret value as a target item. Compares the target's secret field against all candidates of the same type. Useful for detecting password reuse across the vault. | <pre>{
+  "payload": "bw_proxy.models.FindDuplicatesPayload"
+}</pre> |
+| `do get-proxy-audit-context` | Returns the current operational status and recent transaction history of the BW-Proxy. Use this to check for Write-Ahead Log (WAL) orphans (crashed transactions awaiting auto-recovery) and to review recent transaction outcomes. | <pre>{
+  "limit": "int"
+}</pre> |
+| `do get-vault-map` | Retrieves a comprehensive, sanitized map of the vault including Items, Folders, Organizations, and Collections. All secret fields (passwords, TOTP, card numbers, SSN, etc.) are automatically redacted — the caller never sees sensitive values. | <pre>{
+  "search_items": "Optional[str]",
+  "search_folders": "Optional[str]",
+  "folder_id": "Optional[str]",
+  "collection_id": "Optional[str]",
+  "organization_id": "Optional[str]",
+  "trash_state": "str",
+  "include_orgs": "bool"
+}</pre> |
+| `do inspect-transaction-log` | Fetches the COMPLETE detailed JSON payload of a specific transaction log. Contains the full execution_trace, rollback_trace, error_message, and all operation details. Use this to diagnose failed or rolled-back transactions. | <pre>{
+  "tx_id": "str",
+  "n": "int"
+}</pre> |
+| `do propose-vault-transaction` | Proposes a batch of modifications to the vault through the ACID transaction engine. Every transaction is Atomic (all-or-nothing) and backed by a Write-Ahead Log (WAL). A browser popup shows all proposed operations to the user, who must enter their Master Password to approve execution. Destructive actions trigger RED ALERTS. | <pre>{
+  "rationale": "str",
+  "operations": "List[Dict[str, Any]]"
+}</pre> |
+| `do refactor-item-secrets` | BLIND REFACTORING: Safely moves, copies, or deletes secret fields between vault items through the ACID transaction engine. The actual secret values are never exposed — the proxy handles the transfer internally. | <pre>{
+  "rationale": "str",
+  "operations": "List[Dict[str, Any]]"
+}</pre> |
+| `do sync` | Forces a manual vault synchronization with the Bitwarden server. Pulls latest changes from the remote vault into the local cache. Note: All vault-access commands (get-vault-map, propose-vault-transaction, etc.) already perform an automatic sync before execution. Use this command only when you need an explicit manual sync without any other operation. | <pre>{}</pre> |
+
+<!-- API_END -->
+
 ## 🔧 Installation & Commands
 
 Requires Python 3.12+ and `uv`.
@@ -781,50 +830,103 @@ bw-proxy admin log view -l 5
 # View the FULL JSON details of the most recent transaction (index 1)
 bw-proxy admin log view -n 1
 
+# Show the overall local/operator status
+bw-proxy admin status
+bw-proxy admin -f json status
+
+# Authenticate or logout explicitly
+bw-proxy admin login -e user@example.com -u https://vault.example.com
+bw-proxy admin unlock
+bw-proxy admin lock
+bw-proxy admin logout
+
 # Delete old logs, keeping only the 10 most recent ones
 bw-proxy admin log purge -k 10
 
 # Inspect the full Write-Ahead Log state (Requires Master Password)
 bw-proxy admin wal view
 
-# View full configuration
-bw-proxy admin config get
+# Read, set, or edit configuration
+bw-proxy admin config get -m
+bw-proxy admin config get -v
+bw-proxy admin config set -m 25
+bw-proxy admin config set -v terminal
+bw-proxy admin config edit
+
+# Control the local MCP runtime explicitly
+bw-proxy mcp status
+bw-proxy mcp restart
 ```
 
-### 🐳 Docker Installation
-Docker is headless by default for portability. It does not receive `BW_PASSWORD` or `BW_SESSION` from `.env`; authentication always happens interactively through `bw-proxy admin setup` or a per-operation password prompt.
+### 📦 Script Mode (`bw-proxy do`)
+
+`bw-proxy do` is the non-MCP operator surface for direct JSON workflows, automation, and file-oriented runs.
 
 ```bash
-# Build and start the container-backed CLI wrapper
-make docker-install
+# Save the sanitized vault map directly to disk
+bw-proxy do get-vault-map --output-file vault_map.json
 
-# Linux/X11 only: add native Zenity GUI approval support
-make docker-up-gui
+# Inspect a transaction log and persist the exact JSON result
+bw-proxy do inspect-log --n 1 --output-file latest_log.json
 
-# Development mode with source bind-mounts
-make docker-dev
-
-# Development mode with Linux/X11 GUI support
-make docker-dev-gui
+# Import a JSON file through the normal ACID transaction engine
+bw-proxy do import-json items.json --rationale "Bootstrap imported items"
 ```
 
-The default `docker-compose.yml` only mounts `~/.bw/proxy` as persistent state. `docker-compose.gui.yml` is an optional overlay for Linux desktop sessions; cross-platform GUI approval requires a different approval frontend, such as a local browser-based approval UI or a small host desktop companion.
+CLI notes:
+- `bw-proxy admin` now has a centralized `-f/--format json|table` switch for information-style commands such as `status`, `wal view`, `log view`, and `config get`; the default is `table`.
+- Validation transport is centralized too: by default approvals/prompts use the browser, with terminal as fallback. You can switch the preferred mode with `bw-proxy admin config set -v browser|terminal`.
+- `bw-proxy do` is strict RPC 2.0: business operands flow through one JSON payload only. Meta-options remain `--payload`, `--output-file`, `--format`, and `--examples`.
+- `bw-proxy do help` renders the full command reference with Rich-colored JSON schemas, while the generated wrappers validate typed operands through Pydantic V2 before the business logic is called.
+- Only large structured `do` outputs auto-save to the system temp directory when `-o/--output-file` is omitted. Small acknowledgements such as `do sync` stay on stdout only.
+- Commands that need fresh remote state (for example `get-vault-map`, transactions, and duplicate/secret audits) auto-sync first. `do sync` remains the explicit manual sync command.
 
-### ⚙️ Daemon Lifecycle CLI (`bw-proxy`)
+`import-json` accepts:
+- a full payload object with `rationale` and `operations`
+- an object with `items`
+- a raw JSON array of operations or create-item specs
 
-The main entrypoint acts as a lightweight daemon controller similar to `systemd` or `nginx`.
-When run by an AI client without arguments, it defaults to `bw-proxy serve` (stdio mode).
+### 🐳 Docker Installation
+Docker is now **ephemeral by design**. There is no background MCP container anymore. Every `bw-proxy` invocation launched through the host wrapper starts a fresh `docker run --rm` container, mounts the persistent `/data` volume, chooses a free HITL port on `127.0.0.1`, and tears itself down when the command ends.
+
+Docker still does **not** receive `BW_PASSWORD` or `BW_SESSION` from `.env`; authentication happens interactively through `bw-proxy admin login`, `bw-proxy admin unlock`, or a per-operation unlock when no lease is active.
+
+```bash
+# Build the image, create the persistent volume, sync Docker config,
+# and install the host-side wrapper in ~/.local/bin/bw-proxy
+make docker-install
+
+# Prepare the runtime again after config/image changes (no daemon starts)
+make docker-up
+
+# Development image + source-mount workflow
+make docker-dev
+```
+
+`make docker-install` also syncs `.env` (or `.env.example` if missing) to `~/.bw/proxy/docker.env`. The global wrapper reads that file on every invocation so `BW_URL`, `BW_EMAIL`, and HITL flags remain available even when the command is launched outside the repo directory.
+
+The default `docker-compose.yml` is now a **one-shot runtime definition** for manual `docker compose run --rm bw-proxy <args>` usage. It no longer represents a long-lived MCP daemon. The wrapper remains the recommended path because it owns host browser opening and per-call port allocation.
+
+This Docker path is now covered by dedicated concurrency-oriented tests that validate distinct host ports across overlapping invocations and ensure browser auto-open happens exactly once per invocation on the host side.
+
+### ⚙️ MCP Lifecycle CLI (`bw-proxy mcp`)
+
+The root entrypoint now separates MCP runtime concerns from operator workflows.
+When run by an AI client without arguments, it defaults to `bw-proxy mcp serve` (stdio mode).
+
+In **shell mode**, `bw-proxy mcp status|stop|restart` manage the local MCP server process.
+In **Docker mode**, these commands are intentionally rejected by the wrapper because the runtime is now one-shot and has no resident server to manage.
 
 ```bash
 # Check if the server is currently running (reads PID file)
-bw-proxy status
+bw-proxy mcp status
 
 # Stop a running server cleanly via SIGTERM
-bw-proxy stop
+bw-proxy mcp stop
 
 # Restart the server (Useful after 'make install' or 'make install-hardened' to load new bytecode)
 # The MCP client will automatically respawn it on the next query.
-bw-proxy restart
+bw-proxy mcp restart
 
 # Print current version
 bw-proxy version
@@ -854,7 +956,26 @@ Register a new MCP server with:
 - **Type:** `command`
 - **Command:** `bw-proxy`
 
-#### 2. Local Development (Fallthrough)
+#### 2. Docker Runtime (Ephemeral Wrapper)
+If you installed Docker mode via `make docker-install`, the MCP client configuration stays just as simple:
+
+```json
+{
+  "mcpServers": {
+    "bw-proxy": {
+      "command": "bw-proxy",
+      "args": []
+    }
+  }
+}
+```
+
+The difference is runtime behavior, not client configuration:
+- the wrapper launches a fresh container per invocation
+- the persistent Docker volume keeps WAL/log/session state
+- the wrapper chooses a free host HITL port and opens the approval URL on the host browser
+
+#### 3. Local Development (Fallthrough)
 If you are running from the source code without global installation:
 
 **Claude Desktop:**
