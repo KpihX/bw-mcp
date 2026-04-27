@@ -14,7 +14,6 @@ Makefile
 Dockerfile
 docker-compose.yml
 docker-compose.dev.yml
-README.md
 CHANGELOG.md
 TODO.md
 MEMORY.md

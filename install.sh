@@ -14,7 +14,7 @@ GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-echo -e "${BLUE}🛡️  BW-Proxy Sovereign Appliance Installer v3.6.2${NC}"
+echo -e "${BLUE}🛡️  BW-Proxy Sovereign Appliance Installer v3.6.3${NC}"
 
 # Check for root
 if [ "$EUID" -ne 0 ]; then
@@ -140,5 +140,5 @@ EOF
 
 chmod 755 "$BIN_DEST"
 
-echo -e "${GREEN}✅ BW-Proxy Appliance v3.6.2 successfully installed in $BIN_DEST${NC}"
+echo -e "${GREEN}✅ BW-Proxy Appliance v3.6.3 successfully installed in $BIN_DEST${NC}"
 echo -e "Try it now: ${BLUE}bw-proxy admin status${NC}"
