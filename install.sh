@@ -14,7 +14,7 @@ GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-echo -e "${BLUE}🛡️  BW-Proxy Sovereign Appliance Installer${NC}"
+echo -e "${BLUE}🛡️  BW-Proxy Sovereign Appliance Installer v3.6.1${NC}"
 
 # Check for root
 if [ "$EUID" -ne 0 ]; then
@@ -22,28 +22,28 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-# 1. Pull Image
+# 1. Pull Image (The Brain)
 echo -e "${BLUE}📦 Pulling latest appliance image from GHCR...${NC}"
-docker pull "$IMAGE_NAME" || echo -e "${RED}Warning: Could not pull image. Ensure it exists or you have internet access.${NC}"
+docker pull "$IMAGE_NAME" || { echo -e "${RED}Error: Failed to pull image. Check connection/auth.${NC}"; exit 1; }
 
-# 2. Create Volume
+# 2. Infrastructure (The Vault & Config)
 echo -e "${BLUE}💾 Ensuring persistent data volume exists...${NC}"
 docker volume create "$VOLUME_NAME" > /dev/null
 
-# 3. Create Config Directory
-echo -e "${BLUE}⚙️  Creating system configuration directory at $CONFIG_DIR...${NC}"
+echo -e "${BLUE}⚙️  Ensuring config directory at $CONFIG_DIR exists...${NC}"
 mkdir -p "$CONFIG_DIR"
 chmod 755 "$CONFIG_DIR"
 
-# 4. Create Shim Binary (The Sovereign Sword)
-echo -e "${BLUE}🚀 Installing hardened command-line wrapper to $BIN_DEST...${NC}"
+# 3. Forging the Sword (System-wide Shim)
+echo -e "${BLUE}🚀 Installing hardened system binaire to $BIN_DEST...${NC}"
+
+# Note: We use a single-file python script to keep it zero-dependency and fast.
 cat <<'EOF' > "$BIN_DEST"
 #!/usr/bin/env python3
 import os
 import re
 import sys
 import socket
-import shutil
 import subprocess
 import webbrowser
 
@@ -55,11 +55,14 @@ WORKSPACE_DIR = "/workspace"
 URL_PATTERN = re.compile(r"(https?://[^\s]+token=[a-f0-9-]+)")
 
 def _pick_port():
+    """Pick a random free port for HITL."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(('127.0.0.1', 0))
         return s.getsockname()[1]
 
 def _open_browser(url):
+    """Agnostic browser opener."""
+    # Ensure loopback binding
     url = url.replace("0.0.0.0", "127.0.0.1")
     try:
         webbrowser.open(url)
@@ -69,20 +72,25 @@ def _open_browser(url):
 def main():
     args = sys.argv[1:] or ["mcp", "serve"]
     port = _pick_port()
+    uid = os.getuid()
+    gid = os.getgid()
     
-    # Generate stable runtime name
+    # Execution directory for workspace mounting
+    cwd = os.getcwd()
+    
+    # Stable container name for this workspace
     import hashlib
-    cwd_hash = hashlib.sha256(os.getcwd().encode()).hexdigest()[:8]
-    runtime_name = f"bw-proxy-runtime-{os.getuid()}-{cwd_hash}"
+    cwd_hash = hashlib.sha256(cwd.encode()).hexdigest()[:8]
+    runtime_name = f"bw-proxy-appliance-{uid}-{cwd_hash}"
 
-    # Build Docker Command
-    cmd = [
+    # --- Docker Command Assembly ---
+    docker_cmd = [
         "docker", "run", "--rm", "-i", "--init",
-        "--name", f"{runtime_name}-oneshot",
-        "--user", f"{os.getuid()}:{os.getgid()}",
+        "--name", f"{runtime_name}-exec-{os.getpid()}",
+        "--user", f"{uid}:{gid}",
         "-v", f"{VOLUME}:{DATA_DIR}",
-        "-v", f"{os.getcwd()}:{WORKSPACE_DIR}",
-        "-v", "/tmp:/tmp",
+        "-v", f"{cwd}:{WORKSPACE_DIR}",
+        "-v", "/tmp:/tmp", # For temp artifacts
         "-w", WORKSPACE_DIR,
         "-p", f"127.0.0.1:{port}:{port}",
         "-e", f"HITL_PORT={port}",
@@ -92,11 +100,12 @@ def main():
         "-e", "HOME=/data",
         IMAGE
     ]
-    cmd.extend(args)
+    docker_cmd.extend(args)
 
-    # Execute and Intercept URLs for HITL
+    # --- Execution Loop with URL Interception ---
+    # We use stderr for our messages to avoid polluting MCP stdio flux
     process = subprocess.Popen(
-        cmd,
+        docker_cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         stdin=sys.stdin,
@@ -109,25 +118,27 @@ def main():
             line = process.stdout.readline()
             if not line: break
             
+            # Intercept HITL URLs
             match = URL_PATTERN.search(line)
             if match:
                 url = match.group(1)
-                sys.stderr.write(f"\r\n🚀 [Appliance] Opening HITL Approval: {url}\r\n")
+                sys.stderr.write(f"\r\n🚀 [Appliance] Detected Approval URL: {url}\r\n")
                 _open_browser(url)
             
+            # Forward everything to stdout (MCP Protocol)
             sys.stdout.write(line)
             sys.stdout.flush()
     except KeyboardInterrupt:
         process.terminate()
         sys.exit(130)
 
-    sys.exit(process.wait())
+    return process.wait()
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
 EOF
 
 chmod 755 "$BIN_DEST"
 
-echo -e "${GREEN}✅ BW-Proxy Appliance v3.6.1 installed successfully!${NC}"
-echo -e "Usage: ${BLUE}bw-proxy admin status${NC}"
+echo -e "${GREEN}✅ BW-Proxy Appliance v3.6.1 successfully installed in $BIN_DEST${NC}"
+echo -e "Try it now: ${BLUE}bw-proxy admin status${NC}"
