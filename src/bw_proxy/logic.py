@@ -579,7 +579,7 @@ def get_vault_map(
     folder_id: Optional[str] = None,
     collection_id: Optional[str] = None,
     organization_id: Optional[str] = None,
-    trash_state: str = "all",
+    trash_state: str = "none",
     include_orgs: bool = True,
     session_key: Optional[bytearray] = None,
     execution_context: Optional[VaultExecutionContext] = None,
