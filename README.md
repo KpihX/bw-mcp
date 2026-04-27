@@ -99,6 +99,6 @@ bw-proxy do list-items  # Quick redacted scan
 ---
 
 ## ⚖️ License
-Standard KπX Sovereign License. Part of the **K-Homelab** ecosystem.
+MIT License. See `LICENSE` for details.
 
-Designed with ❤️ by **KAMDEM Ivann (KpihX)**.
+Designed with ❤️ by **KpihX**.
